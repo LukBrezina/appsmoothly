@@ -1,0 +1,48 @@
+<%# Browser terminal attached to the tmux session named by the signed token.
+    xterm is vendored (vendor/javascript) — this page mints a shell-capability
+    token, so no third-party JS. Render into a container with id "terminal". %>
+<% content_for :head do %>
+  <link rel="stylesheet" href="<%= asset_path("xterm.min.css") %>">
+  <script src="<%= asset_path("xterm.min.js") %>"></script>
+  <script src="<%= asset_path("addon-fit.min.js") %>"></script>
+<% end %>
+
+<script type="module">
+  import { createConsumer } from "@rails/actioncable"
+
+  await document.fonts.load('13px "IBM Plex Mono"') // xterm measures glyphs at open()
+
+  const term = new Terminal({
+    fontSize: 13,
+    fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
+    theme: {
+      background: "#efe9dc", foreground: "#4c473c", cursor: "#5e9c72", cursorAccent: "#faf6ee",
+      selectionBackground: "#ddd3c0",
+      black: "#4c473c", red: "#c25f50", green: "#5e9c72", yellow: "#b8862f",
+      blue: "#5f83a8", magenta: "#9c7a9c", cyan: "#58948d", white: "#efe9dc",
+      brightBlack: "#857d6b", brightRed: "#d07f6f", brightGreen: "#79b58c", brightYellow: "#cfa35a",
+      brightBlue: "#7fa0c2", brightMagenta: "#b294b2", brightCyan: "#77aca5", brightWhite: "#faf6ee"
+    }
+  })
+  const fit = new FitAddon.FitAddon()
+  term.loadAddon(fit)
+  term.open(document.getElementById("terminal"))
+  fit.fit()
+
+  const sub = createConsumer().subscriptions.create(
+    { channel: "TerminalChannel", token: <%= token.to_json.html_safe %> },
+    {
+      connected() { this.perform("resize", { rows: term.rows, cols: term.cols }) },
+      received(data) { term.write(Uint8Array.from(atob(data), c => c.charCodeAt(0))) },
+      rejected() { term.write("\r\nCouldn't connect — reload the page to try again.\r\n") },
+      disconnected() { term.write("\r\nConnection lost — reload the page to reconnect.\r\n") }
+    }
+  )
+
+  term.onData(data => sub.perform("input", { data }))
+  addEventListener("resize", () => {
+    fit.fit()
+    sub.perform("resize", { rows: term.rows, cols: term.cols })
+  })
+  term.focus()
+</script>

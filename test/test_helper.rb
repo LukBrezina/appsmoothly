@@ -1,4 +1,5 @@
 ENV["RAILS_ENV"] ||= "test"
+ENV["RAF_TRUST_NETWORK"] ||= "1" # controller auth fails closed (see ApplicationController)
 require_relative "../config/environment"
 require "rails/test_help"
 

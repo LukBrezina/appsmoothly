@@ -24,12 +24,13 @@ see [Verified vs untested](#verified-vs-untested).
 bash <(curl -fsSL https://raw.githubusercontent.com/YOURUSER/rails-app-factory/main/setup.sh)
 ```
 
-The script installs tailscale, docker, ruby (rbenv), tmux, litestream and
-Claude Code, generates an SSH key, then starts the factory as a systemd
-service **bound to the tailscale IP only** — it does not exist on the public
-internet. Open `http://<tailscale-ip>:3000` from any tailscale device. Then
-log Claude in once (`claude` → `/login`). Optional extra gate:
-`RAILS_APP_FACTORY_PASSWORD` in `.env` enables HTTP basic auth.
+The script installs tailscale, docker, ruby (rbenv), tmux, litestream, the
+GitHub CLI and Claude Code, generates an SSH key, then starts the factory as a
+systemd service **bound to the tailscale IP only** — it does not exist on the
+public internet. Open `http://<tailscale-ip>:3000` from any tailscale device:
+the **Get started** page signs Claude and GitHub in from browser terminals —
+no need to SSH back in. Optional extra gate: `RAILS_APP_FACTORY_PASSWORD` in
+`.env` enables HTTP basic auth.
 
 **Updating**: `cd ~/rails-app-factory && bin/update` (pull, migrate, restart).
 
@@ -43,7 +44,9 @@ tailwind watcher below).
 - **+ ADD APP** with just a name runs `rails new <name> --css=tailwind` in a
   visible tmux session and installs the factory plumbing as the first commit.
 - Give a **git address** instead and the factory clones your existing app.
-  Private repos: use the ssh address and add the machine's key (shown on the
+  Private GitHub repos work over https once GitHub is connected on the Get
+  started page (`gh auth setup-git` wires git through gh's credentials);
+  other hosts: use the ssh address and add the machine's key (shown on the
   page) as a deploy key.
 - Type any title ("My new app") — the technical name (`my-new-app`) is
   derived automatically and used for folders, URLs and tmux.
@@ -158,7 +161,8 @@ S3-compatible store works.
 - Reserved session names: `setup` (app creation), `deploy`, `restore` —
   they're ordinary tmux sessions the factory drives, and they show up in the
   UI like any session. Reserved app names: see `App::RESERVED_NAMES` (route
-  collisions).
+  collisions; `factory` is reserved because onboarding uses
+  `factory--claude-login`/`factory--github-login` tmux sessions).
 - Worktrees live at `<projects>/.worktrees/<app>--<session>` on branch
   `raf/<session>`. Removal keeps the branch.
 
@@ -171,6 +175,7 @@ S3-compatible store works.
 | `app/models/production.rb` | writes `config/deploy.yml` + `.kamal/secrets` into the app repo, commits, runs kamal in `<app>--deploy` |
 | `app/models/backup.rb` | restore/pull launchers, `litestream generations` status |
 | `app/models/mailbox.rb` | reads a session worktree's `tmp/mails` (RafMailbox delivery, installed by create-app), renders/forwards captured email |
+| `app/models/onboarding.rb` | Get started page (`/start`): checks Claude/gh sign-in, launches `factory--claude-login`/`factory--github-login` tmux sessions for the browser-terminal logins |
 | `app/channels/terminal_channel.rb` | PTY ↔ ActionCable bridge (`tmux attach`), base64 frames, signed-token auth |
 | `bin/hook` | plain-Ruby hook runner (setup/server/teardown DSL) — executed with the *app's* Ruby, keep it old-Ruby-compatible |
 | `bin/create-app` | runs in `<app>--setup` tmux: `rails new` + plumbing, or `git clone` for connected apps |
@@ -264,7 +269,8 @@ Implemented but **not yet run against real infrastructure**: `kamal setup/
 deploy` (incl. the tailscale-SSH + local-registry path), litestream against a
 real GCS bucket, `bin/restore-prod` (its nested quoting through `kamal server
 exec` is the most likely thing to need a fix), `setup.sh` on a fresh Ubuntu
-box, and the `git clone` connect flow for private repos.
+box, the Get started sign-in flows (`claude` login / `gh auth login` inside
+their tmux sessions), and the `git clone` connect flow for private repos.
 
 ## Security notes
 

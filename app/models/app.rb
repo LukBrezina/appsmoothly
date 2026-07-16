@@ -1,6 +1,7 @@
 class App < ApplicationRecord
   AGENTS = %w[claude].freeze
-  RESERVED_NAMES = %w[apps cable assets rails setup deploy restore new up].freeze
+  # "start" is the onboarding route; "factory" prefixes onboarding tmux sessions (factory--<name>)
+  RESERVED_NAMES = %w[apps cable assets rails setup deploy restore new up start factory].freeze
 
   # Users type any title ("My new app"); the technical name (folders, web
   # address, tmux) is derived automatically.

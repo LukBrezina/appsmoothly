@@ -1,0 +1,69 @@
+<% content_for :title, "Get started — Rails App Factory" %>
+
+<section class="flex-1 min-h-0 flex flex-col p-7 max-w-5xl w-full mx-auto">
+  <div class="flex items-baseline gap-4 mb-2">
+    <h2 class="text-[11px] font-medium tracking-[0.3em] text-dim uppercase">Get started</h2>
+    <span class="flex-1 border-t border-line-soft"></span>
+  </div>
+  <p class="text-[11px] text-dim leading-relaxed mt-0 mb-6 max-w-2xl">
+    Two sign-ins and your factory is ready. Claude is the AI developer that builds your
+    apps; GitHub keeps your code safe online. Both sign in right here in the browser —
+    nothing to install on your computer.
+  </p>
+
+  <div class="flex flex-col gap-3.5 mb-6">
+    <% [
+      { title: "Claude", ready: @onboarding.claude_ready?, installed: @onboarding.claude_installed?, name: "claude-login",
+        blurb: "The AI developer you'll talk to in plain language.",
+        ready_label: "signed in", button: "SIGN IN →" },
+      { title: "GitHub", ready: @onboarding.gh_ready?, installed: @onboarding.gh_installed?, name: "github-login",
+        blurb: "Keeps a safe online copy of your code, and lets Claude propose changes for your review.",
+        ready_label: "connected", button: "CONNECT →" }
+    ].each do |row| %>
+      <article class="card bg-panel border border-line clip-tag p-4 flex items-center gap-3.5">
+        <span class="dot" data-state="<%= row[:ready] ? "live" : "idle" %>"></span>
+        <div class="flex-1">
+          <h3 class="m-0 text-[15px] font-medium text-strong leading-tight"><%= row[:title] %></h3>
+          <p class="m-0 mt-1 text-xs text-dim italic"><%= row[:blurb] %></p>
+        </div>
+        <% if row[:ready] %>
+          <span class="text-[11px] tracking-[0.14em] text-live">✓ <%= row[:ready_label].upcase %></span>
+        <% elsif !row[:installed] %>
+          <span class="text-[11px] text-idle">not installed yet — re-run the setup script on this machine</span>
+        <% elsif @terminal == row[:name] %>
+          <span class="text-[11px] text-idle italic">waiting below ↓</span>
+        <% else %>
+          <%= button_to row[:button], onboarding_path, params: { name: row[:name] },
+                class: "font-medium text-[11px] tracking-[0.14em] text-bg bg-live hover:brightness-110 px-3.5 py-2 clip-tag cursor-pointer",
+                form: { class: "contents" } %>
+        <% end %>
+      </article>
+    <% end %>
+  </div>
+
+  <% if @terminal %>
+    <div class="flex-1 min-h-[300px] flex flex-col border border-line bg-panel-2 clip-tag">
+      <div class="flex items-center gap-2.5 px-4 py-2 border-b border-line-soft text-xs shrink-0">
+        <span class="dot" data-state="live"></span>
+        <strong class="font-medium text-strong">
+          <%= @terminal == "claude-login" ? "Type /login and follow the link it shows you." : "Follow the prompts — you'll get a code and a link; open the link on any device and enter the code." %>
+        </strong>
+        <a href="<%= onboarding_path %>" class="ml-auto text-[10px] tracking-[0.14em] text-live border border-live/40 px-2.5 py-1 clip-tag hover:bg-live/10 whitespace-nowrap">I'M DONE — CHECK ✓</a>
+      </div>
+      <div id="terminal" class="flex-1 min-h-0 overflow-hidden"></div>
+    </div>
+    <%= render "shared/terminal", token: @token %>
+  <% elsif @onboarding.done? %>
+    <div class="border border-dashed border-live/40 clip-tag p-6 text-center">
+      <p class="m-0 mb-4 text-[13px] text-live">All set — your factory is ready.</p>
+      <a href="<%= new_app_path %>" class="font-medium text-[11px] tracking-[0.16em] text-bg bg-live hover:brightness-110 px-5 py-2.5 clip-tag">ADD YOUR FIRST APP →</a>
+    </div>
+  <% end %>
+
+  <% unless @onboarding.done? %>
+    <p class="mt-auto pt-6 text-right">
+      <% first_app = App.order(:created_at).first %>
+      <a class="text-[11px] text-faint hover:text-dim" href="<%= first_app ? sessions_path(first_app) : new_app_path %>">skip for now →</a>
+    </p>
+  <% end %>
+</section>

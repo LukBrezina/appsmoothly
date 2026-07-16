@@ -1,5 +1,7 @@
 class AppsController < ApplicationController
   def index
+    return redirect_to onboarding_path unless Onboarding.new.done?
+
     app = App.order(:created_at).first
     redirect_to app ? sessions_path(app) : new_app_path
   end

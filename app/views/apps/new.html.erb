@@ -37,8 +37,10 @@
       <details class="mb-8">
         <summary class="text-[10px] tracking-[0.2em] text-faint cursor-pointer hover:text-dim">PRIVATE REPO? GIVE THIS MACHINE ACCESS</summary>
         <p class="text-[10px] text-faint leading-relaxed mt-2 mb-1">
-          Use the ssh address (<code>git@github.com:you/app.git</code>) and add this machine's key
-          to the repo — on GitHub: your repo → Settings → Deploy keys:
+          On GitHub, the https address just works once GitHub is connected on the
+          <a class="underline hover:text-dim" href="<%= onboarding_path %>">Get started</a> page.
+          Elsewhere: use the ssh address (<code>git@host.com:you/app.git</code>) and add this
+          machine's key to the repo as a deploy key:
         </p>
         <% pubkey = Dir[File.expand_path("~/.ssh/id_*.pub")].first %>
         <pre class="text-[9px] text-dim bg-panel-2 border border-line-soft p-2.5 overflow-x-auto whitespace-pre-wrap break-all m-0"><%= pubkey ? File.read(pubkey).strip : "No key yet — run: ssh-keygen -t ed25519 (setup.sh does this on the VPS)" %></pre>

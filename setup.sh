@@ -22,6 +22,14 @@ echo "=> docker (kamal builds images here)"
 if ! command -v docker >/dev/null; then curl -fsSL https://get.docker.com | sh; fi
 sudo usermod -aG docker "$USER"
 
+echo "=> github cli (Claude uses it to push code and open pull requests)"
+if ! command -v gh >/dev/null; then
+  sudo mkdir -p -m 755 /etc/apt/keyrings
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+  sudo apt-get update -y && sudo apt-get install -y gh
+fi
+
 echo "=> litestream (backup status + pulling prod snapshots)"
 if ! command -v litestream >/dev/null; then
   curl -fsSL -o /tmp/litestream.deb "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-amd64.deb"
@@ -86,9 +94,10 @@ sudo systemctl enable --now rails-app-factory
 
 echo
 echo "=============================================================="
-echo " Factory running:  http://$TS_IP:3000  (tailscale devices only)"
+echo " Factory running:  http://$TS_IP:3000/start  (tailscale devices only)"
 echo
-echo " Next step: log Claude in once — run: claude  (then /login, then exit)"
+echo " Open that in your browser — the Get started page signs Claude and"
+echo " GitHub in, right from the browser. No need to SSH back in."
 echo
 echo " Production servers later: order a VPS, SSH in once and run"
 echo "   curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up --ssh"
