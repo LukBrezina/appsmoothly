@@ -15,11 +15,11 @@
       <div class="text-[10px] tracking-[0.3em] text-faint">NEW SESSION</div>
       <% if @app.ready? %>
         <%= form_with url: sessions_path(@app), method: :post, class: "flex gap-2.5 items-end" do %>
-          <input name="name" placeholder="What you are building" required autocomplete="off"
+          <input name="prompt" placeholder="What should Claude work on?" required autocomplete="off"
                  class="flex-1 min-w-0 bg-transparent border-0 border-b border-line focus:border-live text-strong text-[15px] font-medium px-0.5 py-1 placeholder:text-faint outline-none">
           <button class="font-medium text-[11px] tracking-[0.14em] text-bg bg-live hover:brightness-110 px-3.5 py-2 clip-tag cursor-pointer">START →</button>
         <% end %>
-        <p class="text-[10px] text-faint leading-relaxed m-0">Give it a short name. Claude and a test version of your app start automatically.</p>
+        <p class="text-[10px] text-faint leading-relaxed m-0">Describe it in your own words. Claude names the session itself and gets to work right away.</p>
       <% else %>
         <p class="text-[11px] text-idle m-0">Your app is still being built — watch it happen in the <em>setup</em> session below.</p>
       <% end %>
@@ -28,13 +28,12 @@
     <% @sessions.each do |s| %>
       <article class="card bg-panel border border-line hover:border-line-hover hover:bg-panel-2 transition-colors clip-tag p-4 flex flex-col gap-2.5" data-session-name="<%= s.name %>">
         <header class="flex items-center gap-2.5">
-          <span class="dot" data-dot data-state="<%= s.attached? ? "live" : "idle" %>"></span>
-          <h3 class="flex-1 m-0 text-[15px] font-medium text-strong break-all leading-tight"><%= s.name %></h3>
+          <span class="dot" data-dot data-state="<%= s.state %>"></span>
+          <h3 class="flex-1 m-0 min-h-[2.6em] text-[15px] font-medium text-strong break-words leading-tight line-clamp-2" data-title><%= s.display_title %></h3>
           <span class="cmd" data-cmd data-claude="<%= s.claude? %>"><%= s.display_command %></span>
         </header>
-        <p class="m-0 min-h-[2.6em] text-xs text-dim italic line-clamp-2" data-title><%= s.title || s.display_command %></p>
         <footer class="flex items-center gap-3 border-t border-line-soft pt-2.5">
-          <span class="flex-1 text-[10px] text-faint tracking-[0.06em]">running <%= time_ago_in_words(s.created_at) %></span>
+          <span class="flex-1 text-[10px] text-faint tracking-[0.06em]"><%= s.alive? ? "running #{time_ago_in_words(s.created_at)}" : "asleep — open it to pick up where you left off" %></span>
           <a data-preview target="_blank" href="<%= s.preview_url(preview_host) %>"
              class="text-[10px] tracking-[0.14em] text-idle border border-idle/40 px-2 py-1 clip-tag hover:bg-idle/10 <%= "hidden" unless s.port %>"
              title="Open the test version of your app">TRY IT ↗</a>

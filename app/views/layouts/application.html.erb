@@ -66,7 +66,7 @@
               const s = by[el.dataset.sessionName]
               el.classList.toggle("gone", !s)
               if (!s) return
-              el.querySelectorAll("[data-dot]").forEach(d => d.dataset.state = s.attached ? "live" : "idle")
+              el.querySelectorAll("[data-dot]").forEach(d => d.dataset.state = s.state)
               el.querySelectorAll("[data-title]").forEach(t => t.textContent = s.title || s.command)
               el.querySelectorAll("[data-cmd]").forEach(c => { c.textContent = s.command; c.dataset.claude = s.claude })
               el.querySelectorAll("[data-preview]").forEach(a => {

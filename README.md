@@ -147,10 +147,14 @@ S3-compatible store works.
 ### Big picture
 
 - The factory is a vanilla Rails 8.1 app (Tailwind v4, importmap, SQLite).
-- **SQLite stores only the `apps` table.** Sessions have no rows — **tmux is
-  the source of truth**; the session list is parsed from
-  `tmux list-panes -a` on every request, and per-session state (PORT) lives in
-  the tmux session environment (`tmux show-environment`).
+- **SQLite stores `apps` and `sessions`.** A session row is its identity and
+  lifecycle: it exists until the user ends it. **tmux is the runtime truth**:
+  liveness, attached, current command, live title (parsed from
+  `tmux list-panes -a` on every request), and PORT (tmux session environment,
+  `tmux show-environment`). Row without tmux = *asleep* (e.g. after a server
+  reboot); opening it relaunches tmux in the same worktree with
+  `claude --continue`. Row + tmux + teardown hook + worktree are removed
+  together, only on explicit kill.
 - Everything long-running happens **inside visible tmux sessions** the browser
   can attach to: app creation, deploys, restores. One pattern everywhere.
 
@@ -160,11 +164,15 @@ S3-compatible store works.
   `/\A\w+(?:-\w+)*\z/` (Factory.safe_name / App validations), which makes a
   literal `--` impossible inside a name, so the split is unambiguous.
 - Users type free-text titles; `App#title` is displayed, `App#name` (slugged
-  via `parameterize`) is used for paths/URLs/tmux. Session input is
-  parameterized in the controller.
-- Reserved session names: `setup` (app creation), `deploy`, `restore` —
-  they're ordinary tmux sessions the factory drives, and they show up in the
-  UI like any session. Reserved app names: see `App::RESERVED_NAMES` (route
+  via `parameterize`) is used for paths/URLs/tmux. Sessions are created from a
+  typed task ("What should Claude work on?"): `Session.slug_for` derives the
+  stable slug (≤6 words, ≤48 chars, uniqued), the task becomes Claude's
+  initial prompt, and Claude's own terminal title (OSC → `pane_title`)
+  becomes the display name, persisted to the row as it changes.
+- Reserved session names (`Session::RESERVED`): `setup` (app creation),
+  `deploy`, `restore` — tmux sessions the factory drives. They get no rows;
+  the session list wraps them as unsaved `Session`s while they run. Reserved
+  app names: see `App::RESERVED_NAMES` (route
   collisions; `factory` is reserved because onboarding uses
   `factory--claude-login`/`factory--github-login` tmux sessions).
 - Worktrees live at `<projects>/.worktrees/<app>--<session>` on branch
@@ -175,7 +183,8 @@ S3-compatible store works.
 | file | role |
 |---|---|
 | `app/models/app.rb` | AR model; title→name derivation, prod/backup config columns, `s3_env`/`litestream_env` |
-| `app/models/tmux_session.rb` | PORO; list/launch/kill sessions, tmux styling (mouse on + pastel status bar), worktree paths |
+| `app/models/session.rb` | AR model; session identity/lifecycle, prompt→slug, merges rows with live tmux (`Session.for`), persists Claude's titles |
+| `app/models/tmux_session.rb` | PORO, the runtime half; list/launch/kill tmux sessions, tmux styling (mouse on + pastel status bar), worktree paths |
 | `app/models/production.rb` | writes `config/deploy.yml` + `.kamal/secrets` into the app repo, commits, runs kamal in `<app>--deploy` |
 | `app/models/backup.rb` | restore/pull launchers, `litestream generations` status |
 | `app/models/mailbox.rb` | reads a session worktree's `tmp/mails` (RafMailbox delivery, installed by create-app), renders/forwards captured email |
@@ -190,16 +199,24 @@ S3-compatible store works.
 
 ### Session lifecycle
 
-Launch (`TmuxSession.launch`): pick a free port (bind :0, close) → `git
-worktree add -b raf/<name>` (falls back to reattach if the branch exists) →
-`Factory.clean_tmux!` → `tmux new-session -d` with env `PORT`,
+Create (`sessions#create`): slug the typed task → `Session` row →
+`TmuxSession.launch(app, name, prompt:)`: pick a free port (bind :0, close) →
+`git worktree add -b raf/<name>` (falls back to reattach if the branch
+exists) → `Factory.clean_tmux!` → `tmux new-session -d` with env `PORT`,
 `BINDING=0.0.0.0`, `RAF_APP`, `RAF_SESSION` (+ `S3_*` when backups are
-configured) → window 0 "claude" runs the agent, window 1 "server" runs
-`bin/hook setup server`.
+configured) → window 0 "claude" runs the agent with the task as its prompt,
+window 1 "server" runs `bin/hook setup server`.
 
-Kill (`TmuxSession.kill`): read PORT from tmux env → kill session → run
-`bin/hook teardown` synchronously (chdir worktree, RAF_* env) → `git worktree
-remove --force`.
+Wake (`sessions#show` on an asleep row): `launch(..., resume: true)` — the
+worktree survives reboots, both `git worktree add` calls fail harmlessly,
+tmux restarts there and `claude --continue` picks the conversation back up
+(Claude keys history on the working directory). Never triggered for
+unpersisted names — a typo URL must not create workspaces.
+
+Kill (`sessions#destroy`): `TmuxSession.kill` (read PORT from tmux env → kill
+session → run `bin/hook teardown` synchronously (chdir worktree, RAF_* env) →
+`git worktree remove --force`) → delete the row. Works the same when tmux is
+already gone.
 
 Browser terminal: `sessions#show` mints a signed token
 (`Rails.application.message_verifier`) naming the tmux session; the client
@@ -210,7 +227,9 @@ JSON/UTF-8), and writes input/resizes back. Closing = detach (HUP), never kill.
 Live UI: the layout polls `/:app/sessions.json` every 4s and patches
 `[data-dot] [data-title] [data-cmd] [data-preview]` under any
 `[data-session-name]` element. Claude's task titles arrive via tmux
-`pane_title` (Claude sets the terminal title with OSC escapes).
+`pane_title` (Claude sets the terminal title with OSC escapes) and are
+persisted onto the session row during listing (`Session#sync_title!`), so an
+asleep session still shows the last name Claude gave it.
 
 ### Deploy & backups internals
 

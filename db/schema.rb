@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_03_183032) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_16_160421) do
   create_table "apps", force: :cascade do |t|
     t.string "agent"
     t.datetime "created_at", null: false
@@ -27,4 +27,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_03_183032) do
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_apps_on_name", unique: true
   end
+
+  create_table "sessions", force: :cascade do |t|
+    t.integer "app_id", null: false
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.string "title"
+    t.datetime "updated_at", null: false
+    t.index ["app_id", "name"], name: "index_sessions_on_app_id_and_name", unique: true
+    t.index ["app_id"], name: "index_sessions_on_app_id"
+  end
+
+  add_foreign_key "sessions", "apps"
 end

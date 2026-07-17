@@ -1,5 +1,5 @@
 class SessionsController < AppScopedController
-  RESERVED_SESSION_NAMES = %w[setup deploy restore].freeze
+  RESERVED_SESSION_NAMES = Session::RESERVED
 
   def index
     @sessions = @app.sessions
@@ -13,23 +13,31 @@ class SessionsController < AppScopedController
     @name = Factory.safe_name(params[:id]) or return redirect_to(sessions_path(@app))
     @sessions = @app.sessions
     @session = @sessions.find { |s| s.name == @name } ||
-               TmuxSession.new(app: @app, name: @name).tap { |s| @sessions << s }
+               Session.new(app: @app, name: @name).tap { |s| @sessions << s }
+    # Asleep (the machine restarted since) → wake it: same worktree, Claude
+    # continues its conversation. Only for persisted sessions — a typo URL
+    # must not create workspaces.
+    TmuxSession.launch(@app, @name, resume: true) if @session.persisted? && !@session.alive? && @app.ready?
     @token = Factory.verifier.generate(@session.tmux_name, expires_in: 12.hours)
   end
 
   def create
-    name = Factory.safe_name(params[:name].to_s.parameterize) # "Add user login" → "add-user-login"
-    return redirect_to sessions_path(@app), alert: "Give it a name with a few letters or numbers" unless name
-    return redirect_to sessions_path(@app), alert: "That name is reserved — pick another one" if RESERVED_SESSION_NAMES.include?(name)
+    prompt = params[:prompt].to_s.strip
+    return redirect_to sessions_path(@app), alert: "Tell Claude what to work on in a few words" if prompt.blank?
     return redirect_to sessions_path(@app), alert: "#{@app.display_name} is still being built — give it a minute" unless @app.ready?
 
-    TmuxSession.launch(@app, name)
+    name = Session.slug_for(@app, prompt)
+    Session.create!(app: @app, name:, title: prompt)
+    TmuxSession.launch(@app, name, prompt:)
     redirect_to session_path(@app, name)
   end
 
   def destroy
     name = Factory.safe_name(params[:id])
-    TmuxSession.kill(@app, name) if name
+    if name
+      TmuxSession.kill(@app, name) # kill tmux + teardown hook + remove worktree
+      Session.where(app: @app, name:).destroy_all
+    end
     redirect_to sessions_path(@app)
   end
 end

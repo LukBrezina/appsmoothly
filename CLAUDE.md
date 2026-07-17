@@ -14,10 +14,14 @@ padding, tailwind-watcher TTY). Don't undo those without reading why.
 
 ## Hard rules
 
-- tmux is the source of truth for sessions — don't add session DB tables
-  without migrating that model deliberately.
+- Sessions are DB rows (identity/lifecycle) + tmux (runtime: liveness, PORT,
+  attached, live title). Never infer existence from tmux alone — a row
+  without tmux is *asleep*, not gone; opening it resumes via
+  `claude --continue`. Rows/worktrees are removed only on explicit kill.
 - Names: `<app>--<session>`; the `/\A\w+(?:-\w+)*\z/` validation makes `--`
-  unambiguous. Session/app inputs are free text, parameterized to slugs.
+  unambiguous. App inputs are free text parameterized to slugs; session slugs
+  come from the typed task (`Session.slug_for`), display names from Claude's
+  own terminal title.
 - `bin/hook` executes under each app's own Ruby — keep its syntax
   old-Ruby-compatible.
 - All UI copy targets someone who never coded: deploy→"go live",

@@ -3,9 +3,8 @@
     <a class="flex items-center gap-2 px-4 py-2 border border-b-0 clip-tag max-w-[300px] shrink-0 transition-colors
               <%= s.name == @name ? "border-line bg-panel-2 text-strong shadow-[inset_0_2px_0_var(--color-live)]" : "border-line bg-panel text-dim hover:text-ink hover:bg-panel-2" %>"
        href="<%= session_path(@app, s.name) %>" data-session-name="<%= s.name %>">
-      <span class="dot" data-dot data-state="<%= s.attached? ? "live" : "idle" %>"></span>
-      <span class="text-[12.5px] font-medium whitespace-nowrap"><%= s.name %></span>
-      <span class="text-[11px] italic <%= s.name == @name ? "text-dim" : "text-faint" %> whitespace-nowrap overflow-hidden text-ellipsis" data-title><%= s.title || s.display_command %></span>
+      <span class="dot" data-dot data-state="<%= s.state %>"></span>
+      <span class="text-[12.5px] font-medium whitespace-nowrap overflow-hidden text-ellipsis" data-title><%= s.display_title %></span>
     </a>
   <% end %>
   <a class="flex items-center px-3.5 py-2 border border-b-0 border-line bg-panel clip-tag text-faint hover:text-live text-[15px]" href="<%= sessions_path(@app) %>" title="All sessions">+</a>
@@ -13,9 +12,8 @@
 
 <div class="flex-1 min-h-0 flex flex-col mx-7 mb-5 border border-line bg-panel-2 clip-tag" data-session-name="<%= @name %>">
   <div class="flex items-center gap-2.5 px-4 py-2 border-b border-line-soft text-xs shrink-0">
-    <span class="dot" data-dot data-state="<%= @session.attached? ? "live" : "idle" %>"></span>
-    <strong class="font-medium text-strong"><%= @name %></strong>
-    <span class="flex-1 italic text-dim whitespace-nowrap overflow-hidden text-ellipsis" data-title><%= @session.title %></span>
+    <span class="dot" data-dot data-state="<%= @session.state %>"></span>
+    <strong class="flex-1 font-medium text-strong whitespace-nowrap overflow-hidden text-ellipsis" data-title><%= @session.display_title %></strong>
     <a data-preview target="_blank" href="<%= @session.preview_url(preview_host) %>"
        title="Open the test version of your app"
        class="text-[10px] tracking-[0.14em] text-idle border border-idle/40 px-2.5 py-1 clip-tag hover:bg-idle/10 <%= "hidden" unless @session.port %>">

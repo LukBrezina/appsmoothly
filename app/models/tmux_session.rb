@@ -1,5 +1,8 @@
-# A live tmux session belonging to an app. tmux is the source of truth —
-# nothing here touches the database. Naming convention: "<app>--<session>".
+require "shellwords"
+
+# A live tmux session belonging to an app — the runtime half of Session
+# (which owns identity/lifecycle in the DB). Nothing here touches the
+# database. Naming convention: "<app>--<session>".
 class TmuxSession
   # Runs app hooks from config/rails_app_factory.rb (see that file's docs)
   HOOK_RUNNER = Rails.root.join("bin/hook").to_s
@@ -28,7 +31,10 @@ class TmuxSession
 
     # Worktree on a fresh branch + tmux session with two windows:
     # 0 "claude" (what the browser attaches to) and 1 "server" (setup + bin/dev).
-    def launch(app, name)
+    # prompt: kicks the agent off with the user's typed task.
+    # resume: relaunches a slept session (reboot) — same worktree, agent
+    # continues its previous conversation there.
+    def launch(app, name, prompt: nil, resume: false)
       full = "#{app.name}--#{name}"
       port = Factory.free_port
       worktree = worktree_path(full)
@@ -42,7 +48,8 @@ class TmuxSession
              *env.flat_map { |key, value| ["-e", "#{key}=#{value}"] })
       style(full)
       system("tmux", "rename-window", "-t", full, "claude")
-      system("tmux", "send-keys", "-t", full, app.agent, "Enter")
+      agent = resume ? "#{app.agent} --continue" : [app.agent, prompt&.shellescape].compact.join(" ")
+      system("tmux", "send-keys", "-t", full, agent, "Enter")
       system("tmux", "new-window", "-d", "-t", full, "-n", "server", "-c", worktree)
       system("tmux", "send-keys", "-t", "#{full}:server", "'#{HOOK_RUNNER}' setup server", "Enter")
     end

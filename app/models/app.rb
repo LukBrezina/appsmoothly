@@ -24,7 +24,7 @@ class App < ApplicationRecord
   def display_name = title.presence || name
   def path = File.join(Factory.projects_dir, name)
   def ready? = File.directory?(File.join(path, ".git"))
-  def sessions = TmuxSession.for(self)
+  def sessions = Session.for(self)
 
   # production / backups readiness — kamal uses its local registry, no external creds
   def deployable? = ready? && prod_server.present? && prod_host.present?
