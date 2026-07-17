@@ -7,6 +7,16 @@
 #   hook teardown       session end — before the workspace is deleted
 #
 # Keep this file compatible with old Rubies: connected apps may pin one.
+
+# Run the app's commands under the app's OWN Ruby/bundle. The factory process
+# that spawns us (systemd `ruby bin/rails server`) has bundler's env baked into
+# ENV — RUBYOPT=-rbundler/setup, BUNDLE_GEMFILE, GEM_* — and it rides down into
+# every command we run: RUBYOPT alone makes `bin/dev`'s global foreman die with
+# "not currently included in the bundle". clean_tmux! strips it from the tmux
+# layer, but a hand-re-run hook (or any shell that reintroduces it) still leaks
+# it, so scrub here too — the choke point every hook command flows through.
+%w[BUNDLE_GEMFILE BUNDLE_BIN_PATH BUNDLER_VERSION RUBYOPT RUBYLIB GEM_HOME GEM_PATH].each { |v| ENV.delete(v) }
+
 class FactoryHooks
   HOOK_FILE = "config/rails_app_factory.rb".freeze
 

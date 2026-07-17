@@ -23,6 +23,19 @@ class HookRunnerTest < ActiveSupport::TestCase
     end
   end
 
+  test "scrubs the factory's bundler env so app commands use the app's own bundle" do
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "config"))
+      File.write(File.join(dir, "config/rails_app_factory.rb"), <<~RUBY)
+        setup { sh "echo RUBYOPT=[$RUBYOPT] BUNDLE_GEMFILE=[$BUNDLE_GEMFILE] > seen.txt" }
+      RUBY
+      # Mirror the remote: the factory's real bundler env rides into the hook.
+      env = { "RUBYOPT" => "-rbundler/setup", "BUNDLE_GEMFILE" => Rails.root.join("Gemfile").to_s }
+      assert system(env, RUNNER, "setup", chdir: dir)
+      assert_equal "RUBYOPT=[] BUNDLE_GEMFILE=[]", File.read(File.join(dir, "seen.txt")).strip
+    end
+  end
+
   test "no config and no scripts is a quiet no-op for teardown" do
     Dir.mktmpdir do |dir|
       assert system(RUNNER, "teardown", chdir: dir)
