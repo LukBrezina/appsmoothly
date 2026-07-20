@@ -1,0 +1,55 @@
+#!/bin/bash
+# One-command customer lifecycle. Credentials come from infra/.env — nothing
+# else to source or export.
+#
+#   infra/customer up <name> <admin-email>   provision box + bucket + mail + DNS
+#   infra/customer down <name>               tear down (backups survive retention)
+#   infra/customer list
+set -euo pipefail
+cd "$(dirname "$0")"
+
+[ -f .env ] || { echo "infra/.env missing — cp .env.example .env and fill it in" >&2; exit 1; }
+set -a; . ./.env; set +a
+
+CUSTOMERS=customers.auto.tfvars.json
+[ -f "$CUSTOMERS" ] || echo '{"customers":{}}' > "$CUSTOMERS"
+
+cmd="${1:-}"
+name="${2:-}"
+
+case "$cmd" in
+  up)
+    email="${3:?usage: infra/customer up <name> <admin-email>}"
+    [[ "$name" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || { echo "name must be lowercase letters/digits/dashes" >&2; exit 1; }
+    ruby -rjson -e 'j = JSON.parse(File.read(ARGV[0])); j["customers"][ARGV[1]] = { "admin_email" => ARGV[2] }
+                    File.write(ARGV[0], JSON.pretty_generate(j))' "$CUSTOMERS" "$name" "$email"
+    tofu init -input=false >/dev/null
+    tofu apply -auto-approve
+    ip="$(tofu output -json boxes | ruby -rjson -e 'puts JSON.parse(STDIN.read)[ARGV[0]]' "$name")"
+    echo
+    echo "=> $name is provisioning itself (~15 min; DNS records are already set)."
+    echo "   watch:          ssh ubuntu@$ip tail -f /var/log/appsmoothly-provision.log"
+    echo "   admin password: ssh ubuntu@$ip sudo cat /root/authelia-admin-password.txt"
+    echo "   then open:      https://terminal.$name.appsmoothly.com"
+    ;;
+  down)
+    [ -n "$name" ] || { echo "usage: infra/customer down <name>" >&2; exit 1; }
+    # Backups outlive the customer on purpose: detach the bucket from state so
+    # destroy leaves it (its 30-day retention would refuse deletion anyway).
+    # The service account + HMAC key ARE destroyed — write access dies now.
+    tofu state rm "module.customer[\"$name\"].google_storage_bucket.backups" 2>/dev/null || true
+    ruby -rjson -e 'j = JSON.parse(File.read(ARGV[0])); j["customers"].delete(ARGV[1])
+                    File.write(ARGV[0], JSON.pretty_generate(j))' "$CUSTOMERS" "$name"
+    tofu apply -auto-approve
+    echo
+    echo "=> $name is gone. Bucket appsmoothly-$name kept (undeletable history);"
+    echo "   purge once retention allows: gcloud storage rm -r gs://appsmoothly-$name"
+    ;;
+  list)
+    ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["customers"].keys' "$CUSTOMERS"
+    ;;
+  *)
+    echo "usage: infra/customer up <name> <admin-email> | down <name> | list" >&2
+    exit 1
+    ;;
+esac

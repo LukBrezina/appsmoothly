@@ -20,5 +20,14 @@ Rails.application.routes.draw do
     post "backups/pull/:id" => "backups#pull", as: :backups_pull
   end
 
+  # Caddy on-demand TLS gate: certificates only for p-<port> preview hosts
+  # under this box's domain. Rack lambda so it needs no auth/session.
+  get "caddy_ask" => ->(env) {
+    domain = ENV["RAF_DOMAIN"]
+    asked = Rack::Request.new(env).params["domain"].to_s
+    ok = domain && asked.match?(/\Ap-\d+\.#{Regexp.escape(domain)}\z/)
+    [ok ? 200 : 404, { "content-type" => "text/plain" }, []]
+  }
+
   get "up" => "rails/health#show", as: :rails_health_check
 end

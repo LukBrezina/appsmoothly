@@ -1,0 +1,321 @@
+#cloud-config
+# First boot builds the whole customer box (~15 min, ruby compiles).
+# Watch progress: ssh ubuntu@<ip> then  tail -f /var/log/appsmoothly-provision.log
+# Done marker: /var/log/appsmoothly-provision.done
+
+hostname: ${customer}
+package_update: true
+
+packages:
+  - git
+  - tmux
+  - sqlite3
+  - curl
+  - build-essential
+  - pkg-config
+  - autoconf
+  - bison
+  - libssl-dev
+  - libyaml-dev
+  - zlib1g-dev
+  - libffi-dev
+  - libreadline-dev
+  - libgmp-dev
+
+users:
+  - default
+  - name: claude
+    shell: /bin/bash
+    # joins the docker group in provision.sh, after docker is installed
+
+write_files:
+  - path: /etc/caddy/Caddyfile
+    content: |
+      {
+        email ${admin_email}
+        on_demand_tls {
+          ask http://127.0.0.1:3000/caddy_ask
+        }
+      }
+
+      # the customer's live app (kamal-proxy on loopback)
+      ${domain} {
+        reverse_proxy 127.0.0.1:8080
+      }
+
+      # sign-in portal
+      auth.${domain} {
+        reverse_proxy 127.0.0.1:9091
+      }
+
+      # the factory's browser terminal — Authelia gates every request
+      terminal.${domain} {
+        forward_auth 127.0.0.1:9091 {
+          uri /api/authz/forward-auth
+          copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+        }
+        reverse_proxy 127.0.0.1:3000
+      }
+
+      # session previews: p-<port>.<domain>, same gate. The factory's /caddy_ask
+      # limits on-demand certificates to exactly this host shape.
+      *.${domain} {
+        tls {
+          on_demand
+        }
+        @preview header_regexp preview Host ^p-(\d+)\.
+        handle @preview {
+          forward_auth 127.0.0.1:9091 {
+            uri /api/authz/forward-auth
+          }
+          reverse_proxy 127.0.0.1:{re.preview.1}
+        }
+        respond "not found" 404
+      }
+
+  - path: /etc/authelia/configuration.yml
+    content: |
+      # Placeholder secrets are replaced with random values by provision.sh.
+      theme: light
+
+      server:
+        address: tcp://0.0.0.0:9091
+
+      log:
+        level: info
+
+      authentication_backend:
+        file:
+          path: /config/users_database.yml
+
+      webauthn:
+        enable_passkey_login: true
+
+      access_control:
+        default_policy: deny
+        rules:
+          - domain: "*.${domain}"
+            policy: one_factor
+
+      session:
+        secret: __SESSION_SECRET__
+        cookies:
+          - domain: ${domain}
+            authelia_url: https://auth.${domain}
+            default_redirection_url: https://terminal.${domain}
+
+      storage:
+        encryption_key: __STORAGE_KEY__
+        local:
+          path: /config/db.sqlite3
+
+      notifier:
+        smtp:
+          address: submission://smtp.eu.mailgun.org:587
+          username: app@mail.${domain}
+          password: ${smtp_password}
+          sender: "${customer} sign-in <auth@mail.${domain}>"
+
+      identity_validation:
+        reset_password:
+          jwt_secret: __JWT_SECRET__
+
+  - path: /etc/systemd/system/authelia.service
+    content: |
+      [Unit]
+      Description=Authelia (sign-in gate)
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      ExecStartPre=-/usr/bin/docker rm -f authelia
+      ExecStart=/usr/bin/docker run --name authelia --rm -p 127.0.0.1:9091:9091 -v /etc/authelia:/config authelia/authelia:4.39
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/appsmoothly.service
+    content: |
+      [Unit]
+      Description=Appsmoothly
+      After=network-online.target
+
+      [Service]
+      User=claude
+      WorkingDirectory=/home/claude/appsmoothly
+      EnvironmentFile=/etc/appsmoothly.env
+      ExecStart=/home/claude/.rbenv/shims/ruby bin/rails server -b 127.0.0.1 -p 3000
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/appsmoothly.env
+    permissions: "0600"
+    content: |
+      RAF_PROJECTS_DIR=/home/claude/projects
+      RAF_TRUST_NETWORK=1
+      RAF_DOMAIN=${domain}
+      RAF_S3_BUCKET=${s3_bucket}
+      RAF_S3_REGION=${s3_region}
+      RAF_S3_ENDPOINT=https://storage.googleapis.com
+      RAF_S3_ACCESS_KEY_ID=${s3_access_key_id}
+      RAF_S3_SECRET_ACCESS_KEY=${s3_secret_access_key}
+      RAF_SMTP_ADDRESS=smtp.eu.mailgun.org
+      RAF_SMTP_PORT=587
+      RAF_SMTP_USER_NAME=app@mail.${domain}
+      RAF_SMTP_PASSWORD=${smtp_password}
+      RAF_SMTP_FROM=app@mail.${domain}
+
+  - path: /usr/local/bin/add-user
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # add-user someone@example.com — let them sign in to the terminal; prints a
+      # temporary password. To remove someone: delete their block from
+      # /etc/authelia/users_database.yml and `systemctl restart authelia`.
+      set -euo pipefail
+      email="$1"
+      echo "$email" | grep -qE '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' \
+        || { echo "usage: add-user someone@example.com" >&2; exit 1; }
+      user="$${email%%@*}"
+      if grep -q "^  $user:" /etc/authelia/users_database.yml; then
+        echo "user $user already exists" >&2
+        exit 1
+      fi
+      pw="$(openssl rand -base64 12)"
+      hash="$(docker run --rm authelia/authelia:4.39 authelia crypto hash generate argon2 --password "$pw" | sed 's/^Digest: //')"
+      cat >> /etc/authelia/users_database.yml <<EOF
+        $user:
+          displayname: $user
+          password: "$hash"
+          email: $email
+      EOF
+      systemctl restart authelia
+      echo "sign-in at https://terminal.${domain}"
+      echo "  username: $user"
+      echo "  password: $pw   (have them add a passkey in the portal afterwards)"
+
+  - path: /etc/cron.daily/backup-code
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Nightly: bundle every app's git repo (all branches, incl. raf/ session
+      # branches) into the backup bucket. Together with litestream this makes
+      # the whole VM disposable — Infomaniak has no snapshot scheduler API.
+      set -euo pipefail
+      . /etc/appsmoothly.env
+      export RCLONE_CONFIG_GCS_TYPE=s3
+      export RCLONE_CONFIG_GCS_PROVIDER=GCS
+      export RCLONE_CONFIG_GCS_ENDPOINT=https://storage.googleapis.com
+      export RCLONE_CONFIG_GCS_ACCESS_KEY_ID="$RAF_S3_ACCESS_KEY_ID"
+      export RCLONE_CONFIG_GCS_SECRET_ACCESS_KEY="$RAF_S3_SECRET_ACCESS_KEY"
+      day="$(date -u +%Y%m%d)"
+      shopt -s nullglob
+      for gitdir in /home/claude/projects/*/.git; do
+        repo="$(dirname "$gitdir")"
+        app="$(basename "$repo")"
+        tmp="$(mktemp -u).bundle"
+        git -C "$repo" bundle create "$tmp" --all
+        rclone copyto "$tmp" "gcs:$RAF_S3_BUCKET/code/$app-$day.bundle"
+        rm -f "$tmp"
+      done
+      # box state the bucket would otherwise miss: Authelia users + passkeys
+      tar czf /tmp/authelia.tgz -C /etc authelia
+      rclone copyto /tmp/authelia.tgz "gcs:$RAF_S3_BUCKET/box/authelia-$day.tgz"
+      rm -f /tmp/authelia.tgz
+
+  - path: /root/provision.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euxo pipefail
+      exec >>/var/log/appsmoothly-provision.log 2>&1
+      export DEBIAN_FRONTEND=noninteractive
+
+      # swap — docker builds spike RAM; a 4G box dies without it
+      if [ ! -f /swapfile ]; then
+        fallocate -l 4G /swapfile
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      fi
+
+      # docker (kamal builds and runs the live app here)
+      curl -fsSL https://get.docker.com | sh
+      usermod -aG docker claude
+
+      # caddy — public 80/443, TLS, Authelia forward_auth
+      apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
+      apt-get update -y
+      apt-get install -y caddy
+      # our Caddyfile predates the package's default one; make sure ours is live
+      systemctl restart caddy
+
+      # github cli (Claude pushes code and opens pull requests with it)
+      mkdir -p -m 755 /etc/apt/keyrings
+      curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg > /etc/apt/keyrings/githubcli-archive-keyring.gpg
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
+      apt-get update -y
+      apt-get install -y gh
+
+      # litestream binary (factory backup status + pulling prod data into sessions)
+      curl -fsSL -o /tmp/litestream.deb https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.deb
+      dpkg -i /tmp/litestream.deb
+
+      # rclone (nightly code bundles → bucket, see /etc/cron.daily/backup-code)
+      apt-get install -y rclone
+
+      # authelia: real secrets + the first (admin) user
+      for placeholder in __SESSION_SECRET__ __STORAGE_KEY__ __JWT_SECRET__; do
+        sed -i "s/$placeholder/$(openssl rand -hex 32)/" /etc/authelia/configuration.yml
+      done
+      ADMIN_PW="$(openssl rand -base64 12)"
+      ADMIN_HASH="$(docker run --rm authelia/authelia:4.39 authelia crypto hash generate argon2 --password "$ADMIN_PW" | sed 's/^Digest: //')"
+      cat > /etc/authelia/users_database.yml <<EOF
+      users:
+        admin:
+          displayname: Admin
+          password: "$ADMIN_HASH"
+          email: ${admin_email}
+      EOF
+      echo "$ADMIN_PW" > /root/authelia-admin-password.txt
+      chmod 600 /root/authelia-admin-password.txt
+      systemctl daemon-reload
+      systemctl enable --now authelia
+
+      # ruby + rails + claude code, all as the claude user
+      sudo -iu claude bash <<'CLAUDE_EOF'
+      set -euxo pipefail
+      git clone https://github.com/rbenv/rbenv.git ~/.rbenv
+      git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build
+      printf 'export PATH="$HOME/.rbenv/bin:$PATH"\neval "$(rbenv init - bash)"\n' >> ~/.bashrc
+      export PATH="$HOME/.rbenv/bin:$PATH"
+      eval "$(rbenv init - bash)"
+      rbenv install -s 3.4.7
+      rbenv global 3.4.7
+      gem install rails --no-document
+      curl -fsSL https://claude.ai/install.sh | bash
+      ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
+      mkdir -p ~/projects
+      CLAUDE_EOF
+
+      # the factory itself
+      sudo -iu claude git clone ${factory_repo} /home/claude/appsmoothly
+      sudo -iu claude bash -c 'export PATH="$HOME/.rbenv/bin:$PATH" && eval "$(rbenv init - bash)" && cd ~/appsmoothly && bundle install && bin/rails db:prepare && bin/rails tailwindcss:build'
+      systemctl enable --now appsmoothly
+
+      # kamal deploys to "localhost": claude's key may act as root, loopback only
+      install -d -m 700 /root/.ssh
+      printf 'from="127.0.0.1,::1" %s\n' "$(cat /home/claude/.ssh/id_ed25519.pub)" >> /root/.ssh/authorized_keys
+      chmod 600 /root/.ssh/authorized_keys
+      sudo -iu claude bash -c 'ssh-keyscan -H localhost >> ~/.ssh/known_hosts 2>/dev/null'
+
+      touch /var/log/appsmoothly-provision.done
+
+runcmd:
+  - [bash, /root/provision.sh]

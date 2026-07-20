@@ -46,7 +46,7 @@ chmod +x bin/setup-worktree
 
 # ---------- backups: litestream config (env comes from kamal accessory) ----------
 cat > config/litestream.yml <<'EOS'
-# Streamed SQLite backups (rails-app-factory). Runs as a kamal accessory.
+# Streamed SQLite backups (appsmoothly). Runs as a kamal accessory.
 # retention is a year so litestream rarely attempts deletes — the hardened
 # bucket denies them anyway (that is the point).
 dbs:
@@ -86,14 +86,25 @@ EOS
 
 cat >> config/environments/production.rb <<'EOS'
 
-# rails-app-factory: attachments go to the hardened backups bucket when configured
+# appsmoothly: attachments go to the hardened backups bucket when configured
 Rails.application.configure do
   config.active_storage.service = :amazon if ENV["S3_BUCKET"].present?
+
+  # real email goes through the machine's SMTP credential (Mailgun) when provided
+  if ENV["SMTP_ADDRESS"].present?
+    config.action_mailer.delivery_method = :smtp
+    config.action_mailer.smtp_settings = {
+      address: ENV["SMTP_ADDRESS"], port: ENV.fetch("SMTP_PORT", "587").to_i,
+      user_name: ENV["SMTP_USER_NAME"], password: ENV["SMTP_PASSWORD"],
+      authentication: :plain, enable_starttls_auto: true
+    }
+    config.action_mailer.default_options = { from: ENV["SMTP_FROM"] } if ENV["SMTP_FROM"].present?
+  end
 end
 EOS
 
 cat > config/initializers/rails_app_factory.rb <<'EOS'
-# rails-app-factory development conveniences (development only).
+# appsmoothly development conveniences (development only).
 if Rails.env.development?
   # Allow preview access over tailscale.
   Rails.application.config.hosts << /.+\.ts\.net/
@@ -118,7 +129,7 @@ EOS
 
 # ---------- factory hooks: how sessions run this app ----------
 cat > config/rails_app_factory.rb <<'EOS'
-# How Rails App Factory runs this app — plain Ruby, executed in each session's
+# How Appsmoothly runs this app — plain Ruby, executed in each session's
 # private workspace. Inside blocks: sh("...") runs a shell command and stops on
 # failure; `app`, `session` and `port` identify this workspace; any Ruby works.
 
@@ -187,7 +198,7 @@ EOS
 chmod +x bin/restore-prod
 
 git add -A
-git commit -q -m "Add rails-app-factory plumbing (worktrees, backups, restore)" || true
+git commit -q -m "Add appsmoothly plumbing (worktrees, backups, restore)" || true
 
 echo
 echo "=> $name is ready. Head back to the dashboard and launch a session."

@@ -21,6 +21,11 @@ module Factory
     # ponytail: tiny race between close and bin/dev binding; fine for a single-user tool
   end
 
+  # Set on provisioned customer boxes (e.g. "acme.appsmoothly.com") — the factory
+  # then runs behind Caddy/Authelia: previews become p-<port>.<domain> and
+  # deploys target this same box (see Production).
+  def domain = ENV["RAF_DOMAIN"].presence
+
   def preview_host
     @preview_host ||= JSON.parse(`tailscale status --json 2>/dev/null`).dig("Self", "DNSName").to_s.delete_suffix(".").presence
   rescue StandardError

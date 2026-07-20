@@ -43,7 +43,9 @@ class TmuxSession
         system("git", "-C", app.path, "worktree", "add", worktree, "raf/#{name}") # branch exists → reattach
       Factory.clean_tmux!
       env = { "PORT" => port.to_s, "BINDING" => "0.0.0.0", "RAF_APP" => app.name, "RAF_SESSION" => name }
-      env.merge!(app.s3_env) if app.backups_configured? # lets a pulled prod DB serve its S3 attachments in dev
+      # S3_*: a pulled prod DB serves its attachments in dev. LITESTREAM_*: Claude
+      # can list restore points and run bin/restore-prod / bin/pull-prod-data itself.
+      env.merge!(app.s3_env, app.litestream_env) if app.backups_configured?
       system("tmux", "new-session", "-d", "-s", full, "-c", worktree,
              *env.flat_map { |key, value| ["-e", "#{key}=#{value}"] })
       style(full)
@@ -104,7 +106,10 @@ class TmuxSession
     @port = `tmux show-environment -t '#{tmux_name}' PORT 2>/dev/null`[/PORT=(\d+)/, 1]&.to_i
   end
 
-  def preview_url(host) = port && "http://#{host}:#{port}"
+  def preview_url(host)
+    return unless port
+    Factory.domain ? "https://p-#{port}.#{Factory.domain}" : "http://#{host}:#{port}"
+  end
 
   def as_json(host)
     { name:, attached: attached?, command: display_command, title:, claude: claude?, preview_url: preview_url(host) }

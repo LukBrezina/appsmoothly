@@ -77,7 +77,14 @@ Rails.application.configure do
   # config.generators.apply_rubocop_autocorrect_after_generate!
 end
 
-# rails-app-factory: reachable via tailscale MagicDNS
+# appsmoothly: reachable via tailscale MagicDNS
 Rails.application.configure do
   config.hosts << /.+\.ts\.net/
+
+  # On a provisioned customer box the factory sits behind Caddy/Authelia at
+  # terminal.<domain>; allow that host and its origin for the terminal cable.
+  if ENV["RAF_DOMAIN"].present?
+    config.hosts << "terminal.#{ENV["RAF_DOMAIN"]}"
+    config.action_cable.allowed_request_origins = ["https://terminal.#{ENV["RAF_DOMAIN"]}"]
+  end
 end

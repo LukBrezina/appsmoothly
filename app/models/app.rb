@@ -30,6 +30,12 @@ class App < ApplicationRecord
   def deployable? = ready? && prod_server.present? && prod_host.present?
   def backups_configured? = s3_bucket.present? && s3_access_key_id.present? && s3_secret_access_key.present?
 
+  # Provisioned boxes (infra/) supply the bucket credentials via env, so backups
+  # are on out of the box — no per-app setup, the columns stay a manual override.
+  %w[s3_bucket s3_region s3_endpoint s3_access_key_id s3_secret_access_key].each do |column|
+    define_method(column) { super().presence || ENV["RAF_#{column.upcase}"] }
+  end
+
   def s3_region_or_default = s3_region.presence || "us-east-1"
   def s3_endpoint_or_default = s3_endpoint.presence || "https://s3.#{s3_region_or_default}.amazonaws.com"
 

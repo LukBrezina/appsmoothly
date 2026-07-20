@@ -1,10 +1,10 @@
-# Rails App Factory
+# Appsmoothly
 
-Your personal Rails PaaS on two cheap VPSes. A **development VPS** runs the
-factory: create or connect Rails apps, drive Claude Code on them in browser
-terminals (each session in its own git worktree with a live preview), then
-deploy to a **production VPS** with Kamal — with continuous, undeletable S3
-backups and point-in-time restore.
+Your Rails PaaS in a box. One `tofu apply` provisions a customer VPS running
+the factory behind Caddy + Authelia (email login, passkeys): create or connect
+Rails apps, drive Claude Code on them in browser terminals (each session in
+its own git worktree with a live preview), then go live on the same box with
+Kamal — with continuous, undeletable S3 backups and point-in-time restore.
 
 Status: dev flow is verified end-to-end locally. Production/backup flow is
 implemented and unit-tested but has not yet run against a real VPS/bucket —
@@ -14,29 +14,19 @@ see [Verified vs untested](#verified-vs-untested).
 
 ## User guide
 
-### Get started (development VPS)
+### Get started
 
-1. Order any Ubuntu 22.04/24.04 VPS (2GB+ RAM — it builds Docker images).
-2. Have a [tailscale](https://tailscale.com) account (free tier is fine).
-3. SSH in as a sudo-capable user and run:
+Boxes are provisioned with OpenTofu: one `tofu apply` per customer creates the
+VPS (cloud-init lays down Caddy, Authelia, docker, ruby, Claude Code and the
+factory), a backup bucket that refuses deletion, and a Mailgun sending domain.
+See [infra/README.md](infra/README.md) for the whole flow. Once the DNS
+records from `tofu output dns_records` exist, open
+`https://terminal.<customer>.appsmoothly.com`, sign in (admin password sits on
+the box in `/root/authelia-admin-password.txt`), and use the **Get started**
+page to sign Claude and GitHub in from browser terminals. Let people in with
+`sudo add-user their@email.com` on the box.
 
-```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/LukBrezina/rails-app-factory/main/setup.sh)
-```
-
-The script first asks for a machine name (enter keeps the current one — this
-becomes the machine's tailscale name), installs tailscale (it pauses once with
-a login link — open it in your browser, then it continues on its own), docker, ruby (rbenv), tmux,
-litestream, the GitHub CLI and Claude Code, generates an SSH key, enables a
-firewall that **drops all incoming traffic from the public internet** (SSH
-included — reconnect via the tailscale IP from then on), then starts the
-factory as a systemd service **bound to the tailscale IP only** — it does not
-exist on the public internet. Open `http://<tailscale-ip>:3000` from any tailscale device:
-the **Get started** page signs Claude and GitHub in from browser terminals —
-no need to SSH back in. Optional extra gate: `RAILS_APP_FACTORY_PASSWORD` in
-`.env` enables HTTP basic auth.
-
-**Updating**: `cd ~/rails-app-factory && bin/update` (pull, migrate, restart).
+**Updating**: `cd ~/appsmoothly && bin/update` (pull, migrate, restart).
 
 **Local development of the factory itself**:
 `bin/setup && RAF_PROJECTS_DIR=~/somewhere bin/dev` (or
@@ -103,6 +93,11 @@ automatically.
 
 ### Going live (production)
 
+On a provisioned box this is a button: server (`localhost` — the app runs on
+this same machine behind Caddy) and web address are prefilled, backups are
+already on. The steps below are the standalone two-VPS flow kept for
+non-provisioned setups.
+
 No registry account, no SSH keys — Kamal uses its built-in local registry
 (`localhost:5555`, tunnelled over SSH) and deploys over your tailnet.
 
@@ -119,7 +114,13 @@ No registry account, no SSH keys — Kamal uses its built-in local registry
 
 ### Backups
 
-Recommended storage: a Google Cloud Storage bucket with a **retention policy**
+On a provisioned box backups need no setup: the bucket came with the machine
+(`RAF_S3_*` env), streaming starts with the first deploy, and the BACKUPS page
+is hidden from the menu (still reachable at `/<app>/backups`). Sessions carry
+the `LITESTREAM_*` env, so you can simply ask Claude to list restore points
+(`litestream snapshots`) or rewind (`bin/restore-prod <timestamp>`).
+
+For standalone setups — recommended storage: a Google Cloud Storage bucket with a **retention policy**
 (e.g. 30 days, lockable) — nothing can delete or overwrite objects before they
 age out, regardless of credentials. Service account with only Object Creator +
 Viewer, HMAC key (Interoperability settings), endpoint
@@ -192,7 +193,8 @@ S3-compatible store works.
 | `app/channels/terminal_channel.rb` | PTY ↔ ActionCable bridge (`tmux attach`), base64 frames, signed-token auth |
 | `bin/hook` | plain-Ruby hook runner (setup/server/teardown DSL) — executed with the *app's* Ruby, keep it old-Ruby-compatible |
 | `bin/create-app` | runs in `<app>--setup` tmux: `rails new` + plumbing, or `git clone` for connected apps |
-| `bin/update`, `setup.sh` | factory update / dev-VPS bootstrap (systemd unit bound to tailscale IP) |
+| `bin/update` | update a running factory in place (pull, migrate, rebuild, restart) |
+| `infra/` | OpenTofu: per-customer VPS (cloud-init: Caddy/Authelia/factory), backup bucket, Mailgun domain |
 | `lib/factory.rb` | projects dir, safe_name, free_port, tailscale DNS name, message verifier, `clean_tmux!` |
 | `app/views/layouts/application.html.erb` | header app switcher, sidebar, flash, 4s JSON poll |
 | `app/assets/tailwind/application.css` | design tokens (`@theme`) + the few custom pieces (clip-tag, dots, cmd chips) |
@@ -277,8 +279,8 @@ asleep session still shows the last name Claude gave it.
   `kill-session`) — pane-target commands like `capture-pane` reject them;
   use the bare name.
 - **tailwind v4 watcher exits without a TTY**, killing foreman/`bin/dev` —
-  headless contexts must use `tailwindcss:build` + `rails server` (setup.sh's
-  systemd unit does exactly that).
+  headless contexts must use `tailwindcss:build` + `rails server` (the
+  provisioned box's systemd unit does exactly that).
 - **`rails server` honors PORT and BINDING env** — that's how per-session
   ports and 0.0.0.0 binding reach `bin/dev` without flags.
 - Dev-mode host authorization: apps get a `config.hosts << /.+\.ts\.net/`
@@ -298,16 +300,19 @@ URL serving; detach-on-close; kill removing the worktree and keeping the
 branch; wheel scrollback; hook runner (subprocess tests).
 
 Implemented but **not yet run against real infrastructure**: `kamal setup/
-deploy` (incl. the tailscale-SSH + local-registry path), litestream against a
+deploy` (incl. the localhost + local-registry path), litestream against a
 real GCS bucket, `bin/restore-prod` (its nested quoting through `kamal server
-exec` is the most likely thing to need a fix), `setup.sh` on a fresh Ubuntu
-box, the Get started sign-in flows (`claude` login / `gh auth login` inside
-their tmux sessions), and the `git clone` connect flow for private repos.
+exec` is the most likely thing to need a fix), the whole `infra/` provisioning
+path (tofu + cloud-init + Caddy + Authelia + Mailgun) on a fresh box, the Get
+started sign-in flows (`claude` login / `gh auth login` inside their tmux
+sessions), and the `git clone` connect flow for private repos.
 
 ## Security notes
 
-- The factory and every terminal in it are reachable only over tailscale
-  (systemd binds to the tailscale IP); optional HTTP basic auth on top.
+- On provisioned boxes the factory binds to loopback; Caddy + Authelia
+  (email login, passkeys) are the only way in, for the terminal and for
+  session previews alike. Standalone factories should stay on a private
+  network (tailscale) with optional HTTP basic auth on top.
 - Cable access requires a signed per-session token minted by the page — the
   websocket endpoint can't be driven directly.
 - S3 credentials are plain columns in the factory's SQLite (single-user,

@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-# Rails App Factory hook runner. Runs the Ruby blocks an app defines in
+# Appsmoothly hook runner. Runs the Ruby blocks an app defines in
 # config/rails_app_factory.rb (setup / server / teardown), falling back to the
 # bin/ convention when a block is missing. Executed with the app's own Ruby,
 # from the workspace root:

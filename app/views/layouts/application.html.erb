@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title><%= content_for(:title) || "Rails App Factory" %></title>
+    <title><%= content_for(:title) || "Appsmoothly" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
@@ -18,7 +18,7 @@
 
   <body class="h-dvh flex flex-col bg-bg text-ink font-mono text-[13px] leading-relaxed antialiased">
     <header class="flex items-center gap-7 px-7 py-3.5 border-b border-line bg-linear-to-b from-panel to-transparent shrink-0">
-      <a class="font-serif italic font-semibold text-[21px] text-strong tracking-tight" href="<%= root_path %>">Rails App Factory</a>
+      <a class="font-serif italic font-semibold text-[21px] text-strong tracking-tight" href="<%= root_path %>">Appsmoothly</a>
       <nav class="flex items-center gap-2 overflow-x-auto">
         <% App.order(:created_at).each do |a| %>
           <a href="<%= sessions_path(a) %>"
@@ -40,9 +40,11 @@
       <% if @app&.persisted? %>
         <aside class="w-44 shrink-0 border-r border-line-soft p-5">
           <div class="text-[10px] tracking-[0.3em] text-faint mb-3">MENU</div>
+          <%# provisioned boxes: backups run out of the box and rewinds go through
+              Claude — the page stays reachable by URL for the admin %>
           <% [["SESSIONS", sessions_path(@app), "sessions"],
               ["GO LIVE", production_path(@app), "productions"],
-              ["BACKUPS", backups_path(@app), "backups"]].each do |label, path, ctrl| %>
+              (["BACKUPS", backups_path(@app), "backups"] unless Factory.domain)].compact.each do |label, path, ctrl| %>
             <a class="block px-3 py-2 mb-1 text-[11px] tracking-[0.16em] border-l-2
                       <%= controller_name == ctrl ? "text-live border-live bg-panel" : "text-dim border-transparent hover:text-ink" %>"
                href="<%= path %>"><%= label %></a>

@@ -6,5 +6,5 @@ git pull --ff-only
 bundle install
 bin/rails db:migrate
 bin/rails tailwindcss:build
-sudo systemctl restart rails-app-factory 2>/dev/null || echo "=> restart the factory manually"
+sudo systemctl restart appsmoothly 2>/dev/null || echo "=> restart the factory manually"
 echo "=> factory updated"

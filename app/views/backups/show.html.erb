@@ -12,6 +12,7 @@
     even with stolen passwords.
   </p>
 
+  <% unless ENV["RAF_S3_BUCKET"].present? # provisioned boxes: storage came with the machine %>
   <div class="border border-line bg-panel clip-tag p-6 mb-6 text-[11px] text-dim leading-relaxed">
     <details open>
       <summary class="cursor-pointer text-idle tracking-[0.08em]">SET UP THE STORAGE (GOOGLE CLOUD) — ONCE PER APP, ~5 MINUTES</summary>
@@ -45,6 +46,7 @@
     </div>
     <button class="mt-6 font-medium text-[11px] tracking-[0.16em] text-bg bg-live hover:brightness-110 px-5 py-2.5 clip-tag cursor-pointer">SAVE</button>
     <span class="ml-3 text-[11px] text-faint">Backups start the next time you put the app live. Keys never leave this machine.</span>
+  <% end %>
   <% end %>
 
   <% if @app.backups_configured? %>

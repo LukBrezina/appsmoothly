@@ -1,0 +1,11 @@
+variable "name" { type = string }    # customer slug, e.g. "demo"
+variable "domain" { type = string }  # demo.appsmoothly.com
+variable "zone_id" { type = string } # Designate zone holding all records
+variable "admin_email" { type = string }
+variable "admin_cidr" { type = string }
+variable "keypair" { type = string }
+variable "flavor" { type = string }
+variable "image" { type = string }
+variable "network" { type = string }
+variable "gcs_location" { type = string }
+variable "factory_repo" { type = string }

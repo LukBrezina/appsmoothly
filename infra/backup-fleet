@@ -1,0 +1,25 @@
+#!/bin/bash
+# Whole-machine safety net, independent of everything else in this repo:
+# images every customer box at Infomaniak (nova backup, rotated). If the
+# in-band backups or their restore tooling ever fail, this is the way back:
+#   openstack image list | grep appsmoothly-<name>
+#   openstack server rebuild --image <that-image> appsmoothly-<name>
+#
+# Infomaniak has no backup scheduler, so this runs from the laptop — cron it
+# (crontab -e:  0 4 * * *  /path/to/infra/backup-fleet) or run it by hand
+# before/after risky changes. Boxes may be unresponsive for a few minutes
+# while the image is taken; run it at night.
+#   ROTATE=14 infra/backup-fleet   # keep more than the default 7
+set -euo pipefail
+cd "$(dirname "$0")"
+
+[ -f .env ] || { echo "infra/.env missing — cp .env.example .env and fill it in" >&2; exit 1; }
+set -a; . ./.env; set +a
+
+ROTATE="${ROTATE:-7}"
+for name in $(./customer list); do
+  server="appsmoothly-$name"
+  echo "=> imaging $server (keeping last $ROTATE)"
+  openstack server backup create --name "$server" --type daily --rotate "$ROTATE" "$server"
+done
+echo "=> done — images land under 'openstack image list' as they finish (async)"

@@ -12,29 +12,33 @@
     and Claude experiment.
   </p>
 
-  <div class="border border-line bg-panel clip-tag p-6 mb-6 text-[11px] text-dim leading-relaxed">
-    <div class="text-[10px] tracking-[0.3em] text-faint mb-3">STEP 1 — GET A SERVER (ONCE)</div>
-    <p class="m-0 mb-2">Rent a small Ubuntu server from any provider (Hetzner, DigitalOcean…). Log in to it once and paste:</p>
-    <pre class="text-[10px] text-strong bg-panel-2 border border-line-soft p-3 overflow-x-auto m-0">curl -fsSL https://tailscale.com/install.sh | sh &amp;&amp; sudo tailscale up --ssh</pre>
-    <p class="m-0 mt-2">
-      That connects it to your private tailscale network — after that, everything else is automatic
-      and you never need to log in to it again. One-time setting: in the tailscale admin page, change
-      the ssh rule's <code>"action": "check"</code> to <code>"accept"</code> so going live never stops
-      to ask for approval. One server can host several apps.
-    </p>
-  </div>
+  <% unless Factory.domain %>
+    <div class="border border-line bg-panel clip-tag p-6 mb-6 text-[11px] text-dim leading-relaxed">
+      <div class="text-[10px] tracking-[0.3em] text-faint mb-3">STEP 1 — GET A SERVER (ONCE)</div>
+      <p class="m-0 mb-2">Rent a small Ubuntu server from any provider (Hetzner, DigitalOcean…). Log in to it once and paste:</p>
+      <pre class="text-[10px] text-strong bg-panel-2 border border-line-soft p-3 overflow-x-auto m-0">curl -fsSL https://tailscale.com/install.sh | sh &amp;&amp; sudo tailscale up --ssh</pre>
+      <p class="m-0 mt-2">
+        That connects it to your private tailscale network — after that, everything else is automatic
+        and you never need to log in to it again. One-time setting: in the tailscale admin page, change
+        the ssh rule's <code>"action": "check"</code> to <code>"accept"</code> so going live never stops
+        to ask for approval. One server can host several apps.
+      </p>
+    </div>
+  <% end %>
 
   <%= form_with model: @app, url: production_path(@app), method: :patch, class: "border border-line bg-panel clip-tag p-6 mb-6" do |f| %>
     <div class="text-[10px] tracking-[0.3em] text-faint mb-5">STEP 2 — WHERE YOUR APP WILL LIVE</div>
     <div class="grid grid-cols-2 gap-6">
       <div>
-        <label class="block text-[10px] tracking-[0.2em] text-faint mb-1">SERVER NAME (FROM TAILSCALE)</label>
-        <%= f.text_field :prod_server, placeholder: "prod-1 or 100.x.y.z", autocomplete: "off",
+        <label class="block text-[10px] tracking-[0.2em] text-faint mb-1"><%= Factory.domain ? "SERVER" : "SERVER NAME (FROM TAILSCALE)" %></label>
+        <%= f.text_field :prod_server, placeholder: Factory.domain ? "localhost" : "prod-1 or 100.x.y.z", autocomplete: "off",
+              value: @app.prod_server.presence || ("localhost" if Factory.domain),
               class: "w-full bg-transparent border-0 border-b border-line focus:border-live text-strong text-[14px] px-0.5 py-1.5 placeholder:text-faint outline-none" %>
       </div>
       <div>
         <label class="block text-[10px] tracking-[0.2em] text-faint mb-1">WEB ADDRESS</label>
-        <%= f.text_field :prod_host, placeholder: "myapp.example.com", autocomplete: "off",
+        <%= f.text_field :prod_host, placeholder: Factory.domain || "myapp.example.com", autocomplete: "off",
+              value: @app.prod_host.presence || Factory.domain,
               class: "w-full bg-transparent border-0 border-b border-line focus:border-live text-strong text-[14px] px-0.5 py-1.5 placeholder:text-faint outline-none" %>
       </div>
     </div>
@@ -42,6 +46,12 @@
   <% end %>
 
   <% if @app.prod_server.present? && @app.prod_host.present? %>
+    <% if Factory.domain && @app.prod_host == Factory.domain %>
+      <div class="border border-line bg-panel clip-tag p-6 mb-6 text-[11px] text-dim leading-relaxed">
+        <div class="text-[10px] tracking-[0.3em] text-faint mb-3">WEB ADDRESS</div>
+        <p class="m-0"><code class="text-strong"><%= @app.prod_host %></code> already points at this machine — nothing to set up.</p>
+      </div>
+    <% else %>
     <div class="border border-line bg-panel clip-tag p-6 mb-6">
       <div class="text-[10px] tracking-[0.3em] text-faint mb-4">STEP 3 — POINT YOUR WEB ADDRESS AT THE SERVER</div>
       <p class="text-[11px] text-dim mt-0 mb-3 leading-relaxed">
@@ -62,6 +72,7 @@
         the secure <code>https</code> certificate for <%= @app.prod_host %> is created automatically, and it needs the address to resolve.
       </p>
     </div>
+    <% end %>
 
     <div class="flex items-center gap-4">
       <%= button_to (@app.deployed_at? ? "PUT THE LATEST VERSION LIVE →" : "GO LIVE →"), deploy_production_path(@app),

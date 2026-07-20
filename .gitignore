@@ -36,3 +36,10 @@
 
 /app/assets/builds/*
 !/app/assets/builds/.keep
+
+# tofu: credentials and customer data — never commit
+/infra/.terraform/
+/infra/*.tfstate
+/infra/*.tfstate.*
+/infra/.env
+/infra/customers.auto.tfvars.json
