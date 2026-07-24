@@ -1,23 +1,23 @@
 class OnboardingController < ApplicationController
-  # The sign-in page must work before the app is configured/ready.
-  skip_before_action :set_app
-
   def show
-    @onboarding = Onboarding.new
-    @onboarding.tidy!
-    @terminal = Onboarding::LOGINS.keys.find { |name| @onboarding.running?(name) }
-    @token = Factory.verifier.generate(@onboarding.tmux_name(@terminal), expires_in: 12.hours) if @terminal
+    Onboarding.tidy!
+    @token = Factory.verifier.generate(Onboarding::TMUX, expires_in: 12.hours) if Onboarding.running?
   end
 
-  def create
-    name = params[:name].to_s
-    Onboarding.new.launch(name) if Onboarding::LOGINS.key?(name) # whitelist — never launch arbitrary input
+  # Opens a browser terminal running claude, which asks the user to sign in.
+  def login
+    Onboarding.launch!
     redirect_to onboarding_path
   end
 
-  # Polled by the sign-in page — the link appears mid-flow, after the page loads.
+  # Polled by the sign-in page — the link only appears mid-flow.
   def link
-    onboarding = Onboarding.new
-    render json: { url: Onboarding::LOGINS.keys.lazy.filter_map { |name| onboarding.login_url(name) }.first }
+    render json: { url: Onboarding.login_url }
+  end
+
+  # Starter picked: hand it to claude as its first task and get out of the way.
+  def create
+    Agent.ensure!(prompt: Onboarding.first_prompt(params[:starter], params[:repo]))
+    redirect_to root_path
   end
 end

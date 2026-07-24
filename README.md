@@ -1,15 +1,15 @@
 # Appsmoothly
 
-Your Rails PaaS in a box. One `tofu apply` provisions a customer VPS running
-the factory behind Caddy + Authelia (email login, passkeys), hosting one Rails
-app (created or cloned at provisioning time): drive Claude Code on it in
-browser terminals (each session in its own git worktree with a live preview),
-then go live on the same box with Kamal — with continuous, undeletable S3
-backups and point-in-time restore.
+A browser terminal with Claude in it, on a box that can put your app on the
+internet. You talk (or type) to Claude in plain language; it builds the app,
+runs it, shows it to you, and deploys it. There is no dashboard to learn —
+if Claude needs to show you something, it builds the page and sends you the
+link.
 
-Status: dev flow is verified end-to-end locally. Production/backup flow is
-implemented and unit-tested but has not yet run against a real VPS/bucket —
-see [Verified vs untested](#verified-vs-untested).
+Status: the factory itself is verified end-to-end locally. The provisioned
+box (Caddy + Authelia + backups) is implemented in
+[appsmoothly-infra](https://github.com/LukBrezina/appsmoothly-infra) and has
+not yet run against a real VPS.
 
 ---
 
@@ -17,133 +17,58 @@ see [Verified vs untested](#verified-vs-untested).
 
 ### Get started
 
-Boxes are provisioned with OpenTofu: one `./customer up` per customer creates
-the VPS (cloud-init lays down Caddy, Authelia, docker, ruby, Claude Code and
-the factory), a backup bucket that refuses deletion, and a Mailgun sending
-domain. That lives in a separate private repo,
-[appsmoothly-infra](https://github.com/LukBrezina/appsmoothly-infra) — this
-repo is the factory itself and knows nothing about how its box was made. Once
-the DNS records from `tofu output dns_records` exist, open
-`https://terminal.<customer>.appsmoothly.com`, sign in (admin password sits on
-the box in `/root/authelia-admin-password.txt`), and use the **Get started**
-page to sign Claude and GitHub in from browser terminals. Let people in with
-`sudo add-user their@email.com` on the box.
+Boxes are provisioned with OpenTofu (private repo `appsmoothly-infra`): one
+VPS per customer, running Caddy + Authelia in front of this factory, a backup
+bucket that refuses deletions, and a mail relay. Once the DNS records exist,
+open `https://terminal.<customer>.appsmoothly.com` and sign in.
 
-**Updating**: `cd ~/appsmoothly && bin/update` (pull, migrate, restart).
+The first screen asks for two things:
+
+1. **Allow** notifications, clipboard and microphone (one tap — voice and
+   copy-from-terminal need it).
+2. **Sign Claude in.** A terminal opens, a sign-in link appears as a button.
+   That's the only credential the factory ever waits for; Claude signs you into
+   GitHub itself, later, when your code first needs saving online.
+
+Then pick what to start from — the Appsmoothly starter app, or a repo you
+already have — and Claude takes it from there.
+
+**Updating the factory**: `cd ~/appsmoothly && bin/update` (pull, migrate,
+restart).
 
 **Local development of the factory itself**:
 `bin/setup && APPSMOOTHLY_PROJECTS_DIR=~/somewhere bin/dev` (or
-`bin/rails tailwindcss:build && bin/rails server` — see gotcha about the
-tailwind watcher below).
+`bin/rails tailwindcss:build && bin/rails server` — see the tailwind gotcha).
 
-### The app
+### The one screen
 
-Each box hosts exactly one app. Its name comes from `APPSMOOTHLY_APP` (optional
-`APPSMOOTHLY_APP_TITLE` for the display name); provisioning (appsmoothly-infra) runs
-`bin/create-app <name> [git-address]` once to lay it down at
-`<projects>/<name>` — either `rails new <name> --css=tailwind` with the factory
-plumbing as the first commit, or a clone of your existing repo. The factory
-then adopts whatever is there (`App.current`) and everything — sessions, go
-live, backups — targets that one app. There is no app switcher or add-app step
-in the UI. Private GitHub clones work over https once GitHub is connected on
-the Get started page (`gh auth setup-git`); other hosts: use the ssh address
-and add the machine's key as a deploy key.
+A terminal, and three buttons above it:
 
-### Sessions
+- **🎤** — talk instead of typing. Click it, then hold SPACE while you speak.
+- **TRY IT** — your app, running, as you're building it.
+- **PAGES** — anything Claude has published for you: a preview of an email your
+  app sent, a list of versions you can rewind to, a chart, whatever it decided
+  you needed to see.
 
-A session = one git worktree + one tmux session + one Claude + one dev server
-on a random port. Launch from the SESSIONS page; the browser terminal attaches
-to tmux, the TRY IT link opens the app's test version over tailscale. Closing
-the tab detaches; Claude keeps working. Ending a session runs the app's
-teardown hook, removes the worktree, and keeps the `raf/<name>` branch so all
-committed work stays reachable.
+Everything else happens in the conversation. Ask for a feature, ask to go live,
+ask to undo yesterday — Claude does it and tells you what happened in plain
+language.
 
-Emails the test app "sends" are captured to files (they never reach real
-people) and shown in the factory's own style behind the **INBOX** link next to
-TRY IT. To also forward a captured email to a real address from its preview,
-set `APPSMOOTHLY_SMTP_ADDRESS`, `APPSMOOTHLY_SMTP_USER_NAME`, `APPSMOOTHLY_SMTP_PASSWORD` (optionally
-`APPSMOOTHLY_SMTP_PORT`, `APPSMOOTHLY_SMTP_FROM`) in the factory's `.env` — any SMTP relay.
+### Bring your own app
 
-### Hooks — bring your own app
+Any app works. The one thing that has to be right is its `config/deploy.yml`
+(Kamal) — and Claude writes that itself the first time you go live, using the
+box's settings (see `config/claude-brief.md`). Nothing else is injected into
+your repo: no hook files, no factory-specific plumbing.
 
-Each app tells the factory how to run it in `config/rails_app_factory.rb` —
-plain Ruby, executed in the session's workspace by the factory's `bin/hook`
-runner. `sh "..."` runs a shell command and stops on failure; `app`, `session`
-and `port` identify the workspace; any Ruby works.
+### Going live, and rewinding
 
-```ruby
-setup do                     # session start, in the fresh workspace
-  sh "bundle install"
-  db = "#{app}_dev_#{session}"
-  system "createdb", db      # fine if it already exists
-  File.write ".env", "DATABASE_URL=postgres://localhost/#{db}\n"
-  sh "bin/rails db:prepare"
-end
-
-server do                    # the test server — must listen on ENV["PORT"]
-  sh "bin/dev"
-end
-
-teardown do                  # session end, before the workspace is deleted
-  sh "dropdb --if-exists #{app}_dev_#{session}"
-end
-```
-
-Without the file (or a missing block) the fallback convention applies:
-`bin/setup-worktree` (if executable) → `bin/dev`, and `bin/teardown-worktree`
-on session end. Factory-created apps get the config file + `bin/setup-worktree`
-(copies master.key/.env from the main checkout, bundle, db:prepare) committed
-automatically.
-
-### Going live (production)
-
-On a provisioned box this is a button: server (`localhost` — the app runs on
-this same machine behind Caddy) and web address are prefilled, backups are
-already on. The steps below are the standalone two-VPS flow kept for
-non-provisioned setups.
-
-No registry account, no SSH keys — Kamal uses its built-in local registry
-(`localhost:5555`, tunnelled over SSH) and deploys over your tailnet.
-
-1. Order a fresh Ubuntu VPS, SSH in once:
-   `curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up --ssh`
-   One-time tailnet setting: change the ssh ACL rule's `"action": "check"` to
-   `"accept"` so unattended deploys don't re-prompt.
-2. On the GO LIVE page: enter the server's tailscale name + the domain; create
-   the shown A record (pointing at the server's *public* IP). Wait for DNS —
-   Let's Encrypt needs it.
-3. Deploy. First run is `kamal setup` (installs Docker on the server),
-   afterwards `kamal deploy`. The log streams into a live terminal session.
-   Multiple apps can share one production server.
-
-### Backups
-
-On a provisioned box backups need no setup: the bucket came with the machine
-(`APPSMOOTHLY_S3_*` env), streaming starts with the first deploy, and the BACKUPS page
-is hidden from the menu (still reachable at `/<app>/backups`). Sessions carry
-the `LITESTREAM_*` env, so you can simply ask Claude to list restore points
-(`litestream snapshots`) or rewind (`bin/restore-prod <timestamp>`).
-
-For standalone setups — recommended storage: a Google Cloud Storage bucket with a **retention policy**
-(e.g. 30 days, lockable) — nothing can delete or overwrite objects before they
-age out, regardless of credentials. Service account with only Object Creator +
-Viewer, HMAC key (Interoperability settings), endpoint
-`https://storage.googleapis.com`. Steps are on the BACKUPS page. Any
-S3-compatible store works.
-
-- **Database**: Litestream streams the production SQLite WAL to the bucket
-  every 30 seconds (runs as a Kamal accessory sharing the app's storage
-  volume). Continuous history → restore to any second.
-- **Attachments**: production Active Storage writes to the same bucket, so
-  they share the same undeletability.
-- **Rewind**: pick a UTC timestamp on the BACKUPS page — stops the app,
-  restores the DBs on the prod volume, boots, restarts replication, all in a
-  watchable terminal session.
-- **Copy live data into a session**: one click; runs `bin/pull-prod-data` in a
-  new tmux window of that session. Session gets `S3_*` env so pulled data can
-  serve its attachments straight from the bucket.
-- Litestream backups are SQLite-specific; connected Postgres apps need their
-  own backup story for now. Also enable your VPS provider's machine snapshots.
+Ask. Claude commits your work, writes/updates `config/deploy.yml`, runs
+`kamal setup` (first time) or `kamal deploy`, and reports progress in plain
+language. If the box has a backup bucket (`APPSMOOTHLY_S3_*`), Claude wires up
+Active Storage and a litestream accessory on that first deploy, so the live
+database streams to a bucket that refuses deletions — that's what "rewind to
+Tuesday" runs on.
 
 ---
 
@@ -151,182 +76,108 @@ S3-compatible store works.
 
 ### Big picture
 
-- The factory is a vanilla Rails 8.1 app (Tailwind v4, importmap, SQLite).
-- **One app per box.** `App.current` (named by `APPSMOOTHLY_APP`) is the single app the
-  factory runs; the row is created on first use and holds the mutable state the
-  UI writes (deployed_at, prod/backup config). Nothing is scoped by app — routes
-  are top-level (`/sessions`, `/production`, `/backups`) and `set_app` in
-  `ApplicationController` hands `@app` to every controller.
-- **SQLite stores the one `app` and its `sessions`.** A session row is its identity and
-  lifecycle: it exists until the user ends it. **tmux is the runtime truth**:
-  liveness, attached, current command, live title (parsed from
-  `tmux list-panes -a` on every request), and PORT (tmux session environment,
-  `tmux show-environment`). Row without tmux = *asleep* (e.g. after a server
-  reboot); opening it relaunches tmux in the same worktree with
-  `claude --continue`. Row + tmux + teardown hook + worktree are removed
-  together, only on explicit kill.
-- Everything long-running happens **inside visible tmux sessions** the browser
-  can attach to: deploys, restores. One pattern everywhere. (App creation is
-  not factory-driven — provisioning runs `bin/create-app` before the box is
-  handed over.)
-
-### Naming conventions (load-bearing)
-
-- tmux session name = `<app>--<session>`. Names are validated by
-  `/\A\w+(?:-\w+)*\z/` (Factory.safe_name / App validations), which makes a
-  literal `--` impossible inside a name, so the split is unambiguous.
-- The app's name comes from `APPSMOOTHLY_APP`; `App#title` (from `APPSMOOTHLY_APP_TITLE`) is
-  displayed, `App#name` is used for paths/URLs/tmux. Sessions are created from a
-  typed task ("What should Claude work on?"): `Session.slug_for` derives the
-  stable slug (≤6 words, ≤48 chars, uniqued), the task becomes Claude's
-  initial prompt, and Claude's own terminal title (OSC → `pane_title`)
-  becomes the display name, persisted to the row as it changes.
-- Reserved session names (`Session::RESERVED`): `deploy`, `restore` — tmux
-  sessions the factory drives. They get no rows; the session list wraps them as
-  unsaved `Session`s while they run. Reserved app names: see
-  `App::RESERVED_NAMES` (`factory` is reserved because onboarding uses
-  `factory--claude-login`/`factory--github-login` tmux sessions).
-- Worktrees live at `<projects>/.worktrees/<app>--<session>` on branch
-  `raf/<session>`. Removal keeps the branch.
+- Vanilla Rails 8.1 (Tailwind v4, importmap). **No database** — zero tables.
+- **One tmux session, named `claude`**, running in `<projects>/<APPSMOOTHLY_APP>`
+  with `PORT=3100`. tmux is the only state there is: `has-session` answers
+  "is it alive", and if it isn't, the next page load starts it.
+- The factory owns exactly three things: the browser terminal, the first-run
+  page, and a static file mount. Claude owns everything else and has a real
+  shell to do it with.
+- **`config/claude-brief.md` is where the product lives.** It's attached to
+  every launch with `--append-system-prompt-file`, and it holds the voice rules
+  (plain language, no diffs, always offer next steps) plus the box's wiring:
+  the exact kamal settings this machine needs, the env vars available, `$PORT`,
+  and the publish dir. Features are paragraphs there, not controllers.
 
 ### Key files
 
 | file | role |
 |---|---|
-| `app/models/app.rb` | AR model; `App.current` (the one app, from `APPSMOOTHLY_APP`), prod/backup config columns, `s3_env`/`litestream_env` |
-| `app/models/session.rb` | AR model; session identity/lifecycle, prompt→slug, merges rows with live tmux (`Session.for`), persists Claude's titles |
-| `app/models/tmux_session.rb` | PORO, the runtime half; list/launch/kill tmux sessions, tmux styling (mouse on + pastel status bar), worktree paths |
-| `app/models/production.rb` | writes `config/deploy.yml` + `.kamal/secrets` into the app repo, commits, runs kamal in `<app>--deploy` |
-| `app/models/backup.rb` | restore/pull launchers, `litestream generations` status |
-| `app/models/mailbox.rb` | reads a session worktree's `tmp/mails` (RafMailbox delivery, installed by create-app), renders/forwards captured email |
-| `app/models/onboarding.rb` | Get started page (`/start`): checks Claude/gh sign-in, launches `factory--claude-login`/`factory--github-login` tmux sessions for the browser-terminal logins |
+| `lib/factory.rb` | box facts: app dir, publish dir, domain, preview URL, `clean_tmux!`, `trust!` |
+| `app/models/agent.rb` | the one claude session: `alive?`, `ensure!`, the launch command, tmux styling |
+| `app/models/onboarding.rb` | first run: is claude signed in, the sign-in terminal, the sign-in URL scraper, the starter → first prompt |
+| `app/models/mic.rb` | the box's virtual microphone (PulseAudio pipe-source) |
 | `app/channels/terminal_channel.rb` | PTY ↔ ActionCable bridge (`tmux attach`), base64 frames, signed-token auth |
-| `bin/hook` | plain-Ruby hook runner (setup/server/teardown DSL) — executed with the *app's* Ruby, keep it old-Ruby-compatible |
-| `bin/create-app` | provisioning-time tool (run by appsmoothly-infra, not the UI): `rails new` + plumbing, or `git clone` for connected apps |
-| `bin/update` | update a running factory in place (pull, migrate, rebuild, restart) |
-| `lib/factory.rb` | projects dir, safe_name, free_port, tailscale DNS name, message verifier, `clean_tmux!` |
-| `app/views/layouts/application.html.erb` | header app-name label, sidebar, flash, 4s JSON poll |
-| `app/assets/tailwind/application.css` | design tokens (`@theme`) + the few custom pieces (clip-tag, dots, cmd chips) |
+| `app/channels/mic_channel.rb` | browser mic → the FIFO claude's `/voice` records from |
+| `app/views/terminal/show.html.erb` | the product: terminal + 🎤 + TRY IT + PAGES |
+| `config/claude-brief.md` | claude's briefing — voice, publish dir, kamal settings, env |
+| `config/routes.rb` | root, `/start`, the `/ui` static mount, the Caddy TLS gate |
 
-### Session lifecycle
+### Lifecycle
 
-Create (`sessions#create`): slug the typed task → `Session` row →
-`TmuxSession.launch(app, name, prompt:)`: pick a free port (bind :0, close) →
-`git worktree add -b raf/<name>` (falls back to reattach if the branch
-exists) → `Factory.clean_tmux!` → `tmux new-session -d` with env `PORT`,
-`BINDING=0.0.0.0`, `APPSMOOTHLY_APP`, `APPSMOOTHLY_SESSION` (+ `S3_*` when backups are
-configured) → window 0 "claude" runs the agent with the task as its prompt,
-window 1 "server" runs `bin/hook setup server`.
+**First run.** `/` redirects to `/start` while claude has no credentials, or
+while the app folder is empty and nothing has been launched yet. `/start`
+launches a `login` tmux session running plain `claude` (which offers its
+sign-in flow) and scrapes the sign-in URL out of the pane — the TUI hard-wraps
+it across real newlines and tmux's mouse mode swallows selections, so it can't
+be copied by hand. Picking a starter POSTs to `/start`, which turns the choice
+into a first prompt and launches the agent.
 
-Wake (`sessions#show` on an asleep row): `launch(..., resume: true)` — the
-worktree survives reboots, both `git worktree add` calls fail harmlessly,
-tmux restarts there and `claude --continue` picks the conversation back up
-(Claude keys history on the working directory). Never triggered for
-unpersisted names — a typo URL must not create workspaces.
+**Launch.** `Agent.ensure!` creates the tmux session (env: every
+`APPSMOOTHLY_*` var plus `PORT`/`BINDING`, so the brief can talk about them by
+name), styles it, and types:
 
-Kill (`sessions#destroy`): `TmuxSession.kill` (read PORT from tmux env → kill
-session → run `bin/hook teardown` synchronously (chdir worktree, APPSMOOTHLY_* env) →
-`git worktree remove --force`) → delete the row. Works the same when tmux is
-already gone.
+    claude <flags> --continue || claude <flags> "<first prompt>"
 
-Browser terminal: `sessions#show` mints a signed token
-(`Rails.application.message_verifier`) naming the tmux session; the client
-subscribes to `TerminalChannel` with it; the channel `PTY.spawn`s
-`tmux attach-session`, streams output base64-encoded (PTY bytes aren't valid
-JSON/UTF-8), and writes input/resizes back. Closing = detach (HUP), never kill.
+`--continue` resumes the conversation after a reboot (claude keys history on
+the working directory); on a box that has never run it, that exits non-zero and
+the first prompt runs instead. `test/models/agent_test.rb` runs that line for
+real against a fake claude.
 
-Live UI: the layout polls `/:app/sessions.json` every 4s and patches
-`[data-dot] [data-title] [data-cmd] [data-preview]` under any
-`[data-session-name]` element. Claude's task titles arrive via tmux
-`pane_title` (Claude sets the terminal title with OSC escapes) and are
-persisted onto the session row during listing (`Session#sync_title!`), so an
-asleep session still shows the last name Claude gave it.
+**Staying available.** Every page load calls `ensure!`. If the session is gone
+it's recreated; if the user quit claude and left a shell behind
+(`at_a_shell?` — 10s grace, since claude's process title is its *version
+number*, never "claude") it's restarted in place.
 
-### Deploy & backups internals
+**Terminal.** The page mints a signed token naming the tmux session;
+`TerminalChannel` `PTY.spawn`s `tmux attach-session`, streams output
+base64-encoded (PTY bytes aren't valid JSON/UTF-8), writes input/resizes back.
+Closing the tab detaches (HUP), never kills.
 
-- `Production.deploy_yaml` builds deploy.yml as a string (YAML-validated in
-  tests): kamal local registry (`registry: server: localhost:5555`, plain
-  image name, no creds), `servers: [prod_server]` (a tailscale name/IP),
-  proxy ssl + host, storage volume, and — when backups are configured — a
-  litestream accessory sharing `<app>_storage` with `config/litestream.yml`
-  mounted. `.kamal/secrets` resolves everything from the deploy session's env;
-  the file itself holds no secrets. Both files are committed before deploy
-  because **kamal builds from git HEAD**.
-- First deploy = `kamal setup`, tracked via `apps.deployed_at`; later =
-  `kamal deploy`. Env (S3 keys) is injected into the tmux session via `-e`.
-- Restore: `bin/restore-prod TIMESTAMP` (installed into apps by create-app)
-  stops accessory+app, docker-runs litestream restore against the volume on
-  the server via `kamal server exec`, boots, reboots the accessory. Runs in
-  `<app>--restore` tmux.
-- Backup status: the factory shells out to local `litestream generations` with
-  the app's env (6s timeout, missing-binary handled).
+**Publishing.** `/ui` is a `Rack::Static` mount rooted at `~/public`
+(`APPSMOOTHLY_PUBLISH_DIR`). Claude writes or symlinks HTML there and hands the
+user a link; `index.html` is its home page, behind the PAGES button. Path
+traversal is blocked by Rack; symlinks are followed on purpose.
 
 ### Gotchas (learned the hard way — don't relearn them)
 
 - **Bundler env leaks into tmux.** The tmux server inherits the factory's
-  BUNDLE_GEMFILE/RUBYOPT/GEM_* — `rails new`/`bundle` in sessions would use
+  BUNDLE_GEMFILE/RUBYOPT/GEM_* — `bundle`/`rails new` in the session would use
   the factory's bundle. `Factory.clean_tmux!` strips them globally
   (`tmux set-environment -g -r`) before any spawn. Keep calling it.
 - **claude's process title is its version number** (e.g. "2.1.200"), not
-  "claude" — `TmuxSession#claude?` matches `/\A\d+(\.\d+)+\z/`.
+  "claude" — that's why `at_a_shell?` detects the *absence* of a shell instead.
 - **Turbo Drive is disabled globally** (`application.js`): body swaps would
-  re-run the terminal module script and leak a live tmux attach per
-  navigation. Confirms are plain `onsubmit`, not `turbo_confirm`.
+  re-run the terminal module script and leak a live tmux attach per navigation.
 - **xterm FitAddon** subtracts padding from the `.xterm` element, not its
   container — padding lives on `.xterm` in the CSS or the last row clips.
-- **tmux mouse mode** is set per factory session (`TmuxSession.style`) —
-  without it xterm turns wheel scrolling into arrow keys (shell history).
-  Style also sets a pastel status bar; sessions are created detached, styled,
-  then used.
+- **tmux mouse mode** is set per session (`Agent.style`) — without it xterm
+  turns wheel scrolling into arrow keys (shell history).
 - **Terminal copy is OSC 52, not browser selection.** Mouse mode means a drag
   selects in *tmux*, which copies and emits OSC 52 — xterm core silently drops
   it, so `shared/_terminal` registers a handler that writes it to the browser
-  clipboard (with an `execCommand` fallback for plain-http). `set-clipboard on`
-  (in `style`) additionally lets apps inside tmux set it (claude's "c to
-  copy"). Don't remove either half or copying dies silently again.
+  clipboard. `set-clipboard on` additionally lets apps inside tmux set it
+  (claude's "c to copy"). Don't remove either half or copying dies silently.
 - **`=name` targets only work for session commands** (`has-session`,
-  `kill-session`) — pane-target commands like `capture-pane` reject them;
-  use the bare name.
+  `kill-session`) — pane-target commands like `capture-pane` reject them.
 - **tailwind v4 watcher exits without a TTY**, killing foreman/`bin/dev` —
-  headless contexts must use `tailwindcss:build` + `rails server` (the
-  provisioned box's systemd unit does exactly that).
-- **`rails server` honors PORT and BINDING env** — that's how per-session
-  ports and 0.0.0.0 binding reach `bin/dev` without flags.
-- Dev-mode host authorization: apps get a `config.hosts << /.+\.ts\.net/`
-  initializer (create-app), the factory has the same in development.rb.
-- `bin/hook` runs under the app's Ruby (rbenv shim per worktree) — no modern
-  Ruby syntax in that file.
-- The UI voice is deliberately non-technical (target user: hasn't coded in
-  years). Glossary in use: deploy→"go live", restore→"rewind", worktree→
-  "private workspace", attached→"open in a browser". Keep it.
-
-### Verified vs untested
-
-Verified end-to-end in a real browser (Chrome driving the actual UI):
-app creation via `rails new` watched live; session launch (worktree + claude +
-dev server on a random port); terminal input/output both directions; preview
-URL serving; detach-on-close; kill removing the worktree and keeping the
-branch; wheel scrollback; hook runner (subprocess tests).
-
-Implemented but **not yet run against real infrastructure**: `kamal setup/
-deploy` (incl. the localhost + local-registry path), litestream against a
-real GCS bucket, `bin/restore-prod` (its nested quoting through `kamal server
-exec` is the most likely thing to need a fix), the whole provisioning path
-(appsmoothly-infra: tofu + cloud-init + Caddy + Authelia + Mailgun) on a fresh
-box, the Get
-started sign-in flows (`claude` login / `gh auth login` inside their tmux
-sessions), and the `git clone` connect flow for private repos.
+  headless contexts must use `tailwindcss:build` + `rails server`.
+- **`rails server` honors PORT and BINDING env** — that's how the fixed 3100
+  and 0.0.0.0 binding reach the app's dev server without flags.
+- ActiveRecord is still installed (Rails default plumbing, solid_cache/queue/
+  cable) but the app has zero tables of its own. Deliberate: ripping it out
+  would touch the Gemfile, Dockerfile, bin/setup and buy nothing.
 
 ## Security notes
 
-- On provisioned boxes the factory binds to loopback; Caddy + Authelia
-  (email login, passkeys) are the only way in, for the terminal and for
-  session previews alike. Standalone factories should stay on a private
-  network (tailscale) with optional HTTP basic auth on top.
+- On provisioned boxes the factory binds loopback; Caddy + Authelia (email
+  login, passkeys) are the only way in — for the terminal, for `/ui`, and for
+  app previews alike.
 - Cable access requires a signed per-session token minted by the page — the
   websocket endpoint can't be driven directly.
-- S3 credentials are plain columns in the factory's SQLite (single-user,
-  tailscale-only box); the deny-delete/retention bucket is the real backstop —
-  even leaked keys can't destroy history.
-- Terminal sessions are shells on the dev VPS. Treat tailnet access
-  accordingly.
+- `/ui` serves whatever is in the publish dir on the factory's own origin.
+  Claude writes those pages, and it already has a shell, so this adds no
+  authority — but don't have it serve pages that pull in third-party scripts.
+  Moving `/ui` to its own subdomain (a Caddy `file_server` block + one more
+  entry in the on-demand-TLS allowlist) is the isolation upgrade path.
+- The terminal is a real shell on the box. Treat access accordingly.

@@ -1,16 +1,18 @@
 require "test_helper"
 
 class OnboardingControllerTest < ActionDispatch::IntegrationTest
-  test "shows the checklist" do
+  test "shows the sign-in card" do
     get onboarding_path
     assert_response :success
     assert_match "Claude", response.body
-    assert_match "GitHub", response.body
   end
 
-  test "launches only whitelisted logins" do
-    post onboarding_path, params: { name: "evil-name; rm -rf /" }
-    assert_redirected_to onboarding_path
-    assert_not system("tmux", "has-session", "-t", "=factory--evil-name; rm -rf /", err: File::NULL)
+  test "a picked starter reaches claude as its first task" do
+    task = nil
+    Agent.stub :ensure!, ->(prompt: nil) { task = prompt } do
+      post onboarding_path, params: { starter: "starter" }
+    end
+    assert_redirected_to root_path
+    assert_match Onboarding::STARTER_REPO, task
   end
 end

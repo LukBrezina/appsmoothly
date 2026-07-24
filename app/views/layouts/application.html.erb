@@ -19,9 +19,7 @@
   <body class="h-dvh flex flex-col bg-bg text-ink font-mono text-[13px] leading-relaxed antialiased">
     <header class="flex items-center gap-3 sm:gap-5 px-4 sm:px-6 py-2.5 border-b border-line bg-linear-to-b from-panel to-transparent shrink-0">
       <a class="font-serif italic font-semibold text-[19px] sm:text-[21px] text-strong tracking-tight" href="<%= root_path %>">Appsmoothly</a>
-      <% if @app&.persisted? %>
-        <span class="px-2.5 py-1 text-[11px] tracking-[0.12em] border border-strong/40 text-strong bg-panel-2 clip-tag whitespace-nowrap truncate max-w-[45vw]"><%= @app.display_name %></span>
-      <% end %>
+      <span class="px-2.5 py-1 text-[11px] tracking-[0.12em] border border-strong/40 text-strong bg-panel-2 clip-tag whitespace-nowrap truncate max-w-[45vw]"><%= Factory.app_name %></span>
     </header>
 
     <% if flash[:alert] || flash[:notice] %>
@@ -33,32 +31,5 @@
     <main class="flex-1 flex flex-col min-h-0 min-w-0 overflow-auto">
       <%= yield %>
     </main>
-
-    <% if @app&.persisted? %>
-      <script>
-        // live state poll — refreshes dots, titles, chips and preview links in place
-        const tagged = () => document.querySelectorAll("[data-session-name]")
-        if (tagged().length) setInterval(async () => {
-          try {
-            const list = await (await fetch("<%= sessions_path(format: :json) %>")).json()
-            const by = Object.fromEntries(list.map(s => [s.name, s]))
-            tagged().forEach(el => {
-              const s = by[el.dataset.sessionName]
-              el.classList.toggle("gone", !s)
-              if (!s) return
-              el.querySelectorAll("[data-dot]").forEach(d => d.dataset.state = s.state)
-              el.querySelectorAll("[data-title]").forEach(t => t.textContent = s.title || s.command)
-              el.querySelectorAll("[data-cmd]").forEach(c => { c.textContent = s.command; c.dataset.claude = s.claude })
-              el.querySelectorAll("[data-preview]").forEach(a => {
-                a.classList.toggle("hidden", !s.preview_url)
-                if (s.preview_url) a.href = s.preview_url
-              })
-            })
-            const count = document.querySelector("[data-count]")
-            if (count) count.textContent = `${list.length} session${list.length === 1 ? "" : "s"} · ${list.filter(s => s.attached).length} open in a browser`
-          } catch {}
-        }, 4000)
-      </script>
-    <% end %>
   </body>
 </html>

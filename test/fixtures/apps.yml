@@ -1,7 +1,0 @@
-blog:
-  name: blog
-  agent: claude
-
-shop:
-  name: shop
-  agent: claude

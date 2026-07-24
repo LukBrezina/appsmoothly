@@ -6,9 +6,9 @@
     <span class="flex-1 border-t border-line-soft"></span>
   </div>
   <p class="text-[11px] text-dim leading-relaxed mt-0 mb-6 max-w-2xl">
-    Two sign-ins and your factory is ready. Claude is the AI developer that builds your
-    apps; GitHub keeps your code safe online. Both sign in right here in the browser —
-    nothing to install on your computer.
+    Claude is the developer you'll talk to — in plain language, by typing or by
+    speaking. Sign it in here, pick something to start from, and everything after
+    that happens in the conversation.
   </p>
 
   <article class="card bg-panel border border-line clip-tag p-4 flex items-center gap-3.5 mb-3.5">
@@ -35,43 +35,62 @@
     })
   </script>
 
-  <div class="flex flex-col gap-3.5 mb-6">
-    <% [
-      { title: "Claude", ready: @onboarding.claude_ready?, installed: @onboarding.claude_installed?, name: "claude-login",
-        blurb: "The AI developer you'll talk to in plain language.",
-        ready_label: "signed in", button: "SIGN IN →" },
-      { title: "GitHub", ready: @onboarding.gh_ready?, installed: @onboarding.gh_installed?, name: "github-login",
-        blurb: "Keeps a safe online copy of your code, and lets Claude propose changes for your review.",
-        ready_label: "connected", button: "CONNECT →" }
-    ].each do |row| %>
-      <article class="card bg-panel border border-line clip-tag p-4 flex items-center gap-3.5">
-        <span class="dot" data-state="<%= row[:ready] ? "live" : "idle" %>"></span>
-        <div class="flex-1">
-          <h3 class="m-0 text-[15px] font-medium text-strong leading-tight"><%= row[:title] %></h3>
-          <p class="m-0 mt-1 text-xs text-dim italic"><%= row[:blurb] %></p>
-        </div>
-        <% if row[:ready] %>
-          <span class="text-[11px] tracking-[0.14em] text-live">✓ <%= row[:ready_label].upcase %></span>
-        <% elsif !row[:installed] %>
-          <span class="text-[11px] text-idle">not installed yet — re-run the setup script on this machine</span>
-        <% elsif @terminal == row[:name] %>
-          <span class="text-[11px] text-idle italic">waiting below ↓</span>
-        <% else %>
-          <%= button_to row[:button], onboarding_path, params: { name: row[:name] },
-                class: "font-medium text-[11px] tracking-[0.14em] text-bg bg-live hover:brightness-110 px-3.5 py-2 clip-tag cursor-pointer",
-                form: { class: "contents" } %>
-        <% end %>
-      </article>
+  <article class="card bg-panel border border-line clip-tag p-4 flex items-center gap-3.5 mb-6">
+    <span class="dot" data-state="<%= Onboarding.ready? ? "live" : "idle" %>"></span>
+    <div class="flex-1">
+      <h3 class="m-0 text-[15px] font-medium text-strong leading-tight">Claude</h3>
+      <p class="m-0 mt-1 text-xs text-dim italic">Signs in right here in the browser — nothing to install on your computer.</p>
+    </div>
+    <% if Onboarding.ready? %>
+      <span class="text-[11px] tracking-[0.14em] text-live">✓ SIGNED IN</span>
+    <% elsif !Onboarding.installed? %>
+      <span class="text-[11px] text-idle">not installed yet — re-run the setup script on this machine</span>
+    <% elsif @token %>
+      <span class="text-[11px] text-idle italic">waiting below ↓</span>
+    <% else %>
+      <%= button_to "SIGN IN →", onboarding_login_path, form: { class: "contents" },
+            class: "font-medium text-[11px] tracking-[0.14em] text-bg bg-live hover:brightness-110 px-3.5 py-2 clip-tag cursor-pointer" %>
     <% end %>
-  </div>
+  </article>
 
-  <% if @terminal %>
-    <div class="flex-1 min-h-[300px] flex flex-col border border-line bg-panel-2 clip-tag">
+  <% if Onboarding.ready? %>
+    <div class="flex items-baseline gap-4 mb-3.5">
+      <h2 class="text-[11px] font-medium tracking-[0.3em] text-dim uppercase">Start from</h2>
+      <span class="flex-1 border-t border-line-soft"></span>
+    </div>
+    <div class="flex flex-col gap-3.5">
+      <%= button_to onboarding_path, params: { starter: "starter" }, form: { class: "contents" },
+            class: "card bg-panel border border-line clip-tag p-4 flex items-center gap-3.5 text-left w-full hover:border-line-hover cursor-pointer" do %>
+        <span class="dot" data-state="live"></span>
+        <span class="flex-1">
+          <span class="block text-[15px] font-medium text-strong leading-tight">The Appsmoothly starter app</span>
+          <span class="block mt-1 text-xs text-dim italic">A working app with sign-in, email and payments already wired up. Best place to start.</span>
+        </span>
+        <span class="text-[11px] tracking-[0.14em] text-live whitespace-nowrap">USE THIS →</span>
+      <% end %>
+
+      <%= form_with url: onboarding_path, method: :post, data: { turbo: false },
+            class: "card bg-panel border border-line clip-tag p-4 flex items-center gap-3.5" do |f| %>
+        <%= f.hidden_field :starter, value: "repo" %>
+        <span class="dot" data-state="idle"></span>
+        <span class="flex-1">
+          <span class="block text-[15px] font-medium text-strong leading-tight">Something you already have</span>
+          <%= f.text_field :repo, placeholder: "https://github.com/you/your-app", autocomplete: "off",
+                class: "block mt-1.5 w-full max-w-md bg-panel-2 border border-line px-2.5 py-1.5 text-xs text-ink outline-none focus:border-line-hover" %>
+        </span>
+        <%= f.submit "BRING IT IN →", class: "text-[11px] tracking-[0.14em] text-idle border border-idle/50 px-3 py-2 clip-tag hover:bg-idle/10 cursor-pointer whitespace-nowrap" %>
+      <% end %>
+
+      <%= button_to "or just start talking to Claude →", onboarding_path, form: { class: "contents" },
+            class: "text-[11px] text-faint hover:text-dim text-right bg-transparent border-0 cursor-pointer p-0 mt-1" %>
+    </div>
+  <% end %>
+
+  <% if @token %>
+    <div class="flex-1 min-h-[300px] flex flex-col border border-line bg-panel-2 clip-tag mt-6">
       <div class="flex items-center gap-2.5 px-4 py-2 border-b border-line-soft text-xs shrink-0">
         <span class="dot" data-state="live"></span>
-        <strong class="font-medium text-strong">
-          <%= @terminal == "claude-login" ? "Follow the steps below — when your sign-in link is ready, a button appears here." : "You'll get an 8-character code below — the button here opens GitHub, where you type it in." %>
-        </strong>
+        <strong class="font-medium text-strong">Follow the steps below — when your sign-in link is ready, a button appears here.</strong>
         <span class="ml-auto flex items-center gap-2.5">
           <a id="login-link" hidden target="_blank" rel="noopener" class="font-medium text-[10px] tracking-[0.14em] text-bg bg-live hover:brightness-110 px-2.5 py-1 clip-tag whitespace-nowrap">OPEN SIGN-IN PAGE ↗</a>
           <a href="<%= onboarding_path %>" class="text-[10px] tracking-[0.14em] text-live border border-live/40 px-2.5 py-1 clip-tag hover:bg-live/10 whitespace-nowrap">I'M DONE — CHECK ✓</a>
@@ -89,16 +108,5 @@
         link.hidden = !url
       }, 2000)
     </script>
-  <% elsif @onboarding.done? %>
-    <div class="border border-dashed border-live/40 clip-tag p-6 text-center">
-      <p class="m-0 mb-4 text-[13px] text-live">All set — your factory is ready.</p>
-      <a href="<%= root_path %>" class="font-medium text-[11px] tracking-[0.16em] text-bg bg-live hover:brightness-110 px-5 py-2.5 clip-tag">GO TO YOUR APP →</a>
-    </div>
-  <% end %>
-
-  <% unless @onboarding.done? %>
-    <p class="mt-auto pt-6 text-right">
-      <a class="text-[11px] text-faint hover:text-dim" href="<%= root_path %>">skip for now →</a>
-    </p>
   <% end %>
 </section>

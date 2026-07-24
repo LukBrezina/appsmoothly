@@ -1,61 +1,54 @@
 # CLAUDE.md
 
 Read the README first — its "Architecture" section is the handoff document:
-big picture, naming conventions, session lifecycle, deploy/backup internals,
-and a Gotchas list of non-obvious constraints (bundler-env stripping into
-tmux, Turbo Drive deliberately off, claude's process title, xterm FitAddon
-padding, tailwind-watcher TTY). Don't undo those without reading why.
+big picture, the one session, the publish dir, and a Gotchas list of
+non-obvious constraints (bundler-env stripping into tmux, Turbo Drive
+deliberately off, claude's process title, xterm FitAddon padding,
+tailwind-watcher TTY). Don't undo those without reading why.
 
 ## Commands
 
-- `bin/rails test` — the suite (fast; includes subprocess tests of bin/hook)
+- `bin/rails test` — the suite (fast; includes a real shell test of the launch command)
 - `bin/rails tailwindcss:build` — required after CSS/token changes if no watcher runs
 - `APPSMOOTHLY_PROJECTS_DIR=<dir> bin/dev` — run locally (foreman needs a TTY; headless: `tailwindcss:build` + `bin/rails server`)
 
 ## Hard rules
 
-- Sessions are DB rows (identity/lifecycle) + tmux (runtime: liveness, PORT,
-  attached, live title). Never infer existence from tmux alone — a row
-  without tmux is *asleep*, not gone; opening it resumes via
-  `claude --continue`. Rows/worktrees are removed only on explicit kill.
-- This box hosts exactly ONE app, named by `APPSMOOTHLY_APP` and adopted by
-  `App.current` (created on first use; carries deployed_at + prod/backup
-  config). There is no app switcher / add-app / app-scoped routes — provisioning
-  (appsmoothly-infra) clones the app into `<projects>/<name>`; the factory just
-  runs it. `bin/create-app` is the infra's tool, not driven from the UI.
-- Names: `<app>--<session>`; the `/\A\w+(?:-\w+)*\z/` validation makes `--`
-  unambiguous. The app name comes from `APPSMOOTHLY_APP`; session slugs come from the
-  typed task (`Session.slug_for`) or default to `claude`/`claude-2`/… for a
-  blank "+" tab; display names come from Claude's own terminal title.
-- One screen: root drops you into a session (the first one, or a fresh `claude`
-  tab). Tabs switch/add sessions; two buttons run the box — **Deploy**
-  (`productions#deploy`, auto-fills localhost + the box domain) and **Versions**
-  (`versions#index`: git log → roll code *and* data back to a commit). There is
-  no sidebar, no Go Live page, no Backups page.
+- **The factory is a terminal and a first-run page. That's the product.** One
+  tmux session named `claude`, always available, running in
+  `<projects>/<APPSMOOTHLY_APP>`. Everything else — sessions, worktrees, dev
+  servers, deploys, previews, email, rollbacks — is claude's job, done through
+  the shell it already has. Don't add a button for something claude can do and
+  explain.
+- **No database.** `Agent.alive?` asks tmux; the filesystem holds the app. There
+  are zero tables and no models with state. If you find yourself wanting a row,
+  you're rebuilding what was deleted.
+- **`config/claude-brief.md` is the product**, attached to every launch with
+  `--append-system-prompt-file`. Non-technical voice, no diffs, proactive next
+  steps, and the box's wiring (kamal settings, env vars, `$PORT`, the publish
+  dir). New box capability → a paragraph there, not a controller.
+- **The publish dir (`~/public` → `/ui`) is claude's UI surface.** It writes or
+  symlinks HTML and hands the user a link. That is how an inbox, a version
+  list, or a chart gets built now. Symlinks are followed on purpose.
+- Claude defaults are injected per-launch (`--permission-mode auto --settings
+  config/claude-settings.json --append-system-prompt-file config/claude-brief.md`)
+  and the app dir is pre-trusted (`Factory.trust!`) — never edits the box's
+  global claude config.
+- Launch is `claude … --continue || claude … "<first prompt>"`: a reboot resumes
+  the conversation, a fresh box gets its first task. `Agent#at_a_shell?` restarts
+  claude if the user quit out of it. Both covered by `test/models/agent_test.rb`.
 - Localhost-only: the factory binds loopback (`config/puma.rb`) and has no
-  in-app auth gate — the network is the boundary. Don't reintroduce
-  `APPSMOOTHLY_TRUST_NETWORK`/password.
-- Claude defaults are injected per-launch via `--permission-mode auto --settings
-  config/claude-settings.json` (light theme, `/voice`, auto-approve) and each
-  worktree is pre-trusted (`Factory.trust!`) — never edits the box's global
-  claude config.
+  in-app auth gate — the network is the boundary (Caddy + Authelia in front on a
+  provisioned box). Don't reintroduce an app-level password.
 - Voice on a headless box: the browser streams mic audio (16 kHz mono PCM) over
   `MicChannel` into a PulseAudio pipe-source (`Mic`, the default input), so
   claude's own `/voice` records it and transcribes with Anthropic's model. The
-  🎤 button opens the mic; the user then runs `/voice`. **Provisioning
+  🎤 button opens the mic; hold SPACE to talk. **Provisioning
   (appsmoothly-infra) must install `pulseaudio pulseaudio-utils sox` and run a
   per-user pulse daemon (`--exit-idle-time=-1`)** — the factory only creates the
-  virtual source. `bin/mic-proof` is the box-side sanity check. Proven with the
-  shared default source; per-session `PULSE_SOURCE` is the upgrade path.
-- `bin/hook` executes under each app's own Ruby — keep its syntax
-  old-Ruby-compatible.
-- All UI copy targets someone who never coded: deploy→"go live",
-  restore→"rewind", worktree→"private workspace", attached→"open in a browser".
-- Long-running work (deploy, rollback) runs in visible tmux sessions named
-  `<app>--deploy/rollback` — keep that pattern for new features. Rollback does
-  `git reset --hard <sha>` → deploy → `bin/restore-prod <commit time>`.
-- App repo: provisioning (appsmoothly-infra) normally clones it in. But an
-  *empty* box no longer dead-ends — `App#ensure_repo!` bootstraps an empty git
-  repo (so a worktree/session can launch and claude can build the app) rather
-  than showing "still setting up". It refuses to touch a dir that already has
-  files, so an in-flight clone is never clobbered.
+  virtual source. `bin/mic-proof` is the box-side sanity check.
+- All UI copy targets someone who never coded: deploy→"go live", "try it",
+  "pages". The brief holds claude to the same voice.
+- Provisioning's only jobs now: install claude/tmux/kamal/pulse, set the
+  `APPSMOOTHLY_*` env, create `<projects>/`, run the factory. It no longer
+  creates or clones an app — the first-run page hands that to claude.
