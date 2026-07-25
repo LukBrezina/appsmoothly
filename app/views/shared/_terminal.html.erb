@@ -195,26 +195,31 @@
     })
   }
 
-  // Touch scrollback: with tmux mouse mode on, the wheel scrolls claude's history
-  // — but phones emit no wheel, so there's no way to scroll up. Translate a
-  // one-finger drag into xterm's own scroll (local scrollback, no input sent to
-  // claude). A tap without drag falls through to xterm, so tap-to-focus still works.
+  // Touch scrollback: the history lives in tmux, not xterm (tmux only repaints
+  // the visible rows), so scrolling means doing what a mouse wheel does — with
+  // tmux mouse mode on, xterm forwards wheel events to tmux, which scrolls. But
+  // phones emit no wheel, so translate a one-finger drag into synthetic wheel
+  // events on xterm's screen element; xterm encodes them for whatever mouse mode
+  // is active and forwards to tmux. A tap (no drag) still falls through to focus.
   const el = document.getElementById("terminal")
-  let dragY = null, dragging = false
+  const screen = () => term.element?.querySelector(".xterm-screen") || term.element
+  let startY = null, lastY = null, dragging = false
   el.addEventListener("touchstart", e => {
-    if (e.touches.length === 1) { dragY = e.touches[0].clientY; dragging = false }
+    if (e.touches.length === 1) { startY = lastY = e.touches[0].clientY; dragging = false }
   }, { passive: true })
   el.addEventListener("touchmove", e => {
-    if (dragY === null || e.touches.length !== 1) return
-    const dy = dragY - e.touches[0].clientY          // finger down (dy<0) → scroll up
-    if (!dragging && Math.abs(dy) < 8) return
+    if (lastY === null || e.touches.length !== 1) return
+    const y = e.touches[0].clientY
+    if (!dragging && Math.abs(y - startY) < 8) return   // let a tap through to xterm
     dragging = true
-    e.preventDefault()                               // no native scroll / tmux drag-select
-    const lines = Math.trunc(dy / 16)                // ~16px per row
-    if (lines !== 0) { term.scrollLines(lines); dragY = e.touches[0].clientY }
+    const dy = lastY - y                                // finger down (dy<0) → wheel up → history
+    lastY = y
+    e.preventDefault()                                  // no native scroll / stray tmux click
+    if (dy !== 0) screen()?.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }))
   }, { passive: false })
-  el.addEventListener("touchend", () => { dragY = null }, { passive: true })
-  el.addEventListener("touchcancel", () => { dragY = null }, { passive: true })
+  const endTouch = () => { startY = lastY = null }
+  el.addEventListener("touchend", endTouch, { passive: true })
+  el.addEventListener("touchcancel", endTouch, { passive: true })
 
   // iOS/Android give no drag-select or double-tap paste over xterm's canvas, so
   // offer an explicit clipboard button on touch devices. term.paste respects the
