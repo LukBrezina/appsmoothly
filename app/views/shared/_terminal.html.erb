@@ -163,26 +163,58 @@
 
   term.onData(data => sub.perform("input", { data }))
 
+  // Resize the PTY only when the grid actually changes, and coalesce bursts into
+  // one animation frame. Mobile fires resize/visualViewport events in storms
+  // (address bar, momentum scroll, keyboard); hammering tmux with winsize changes
+  // makes it redraw over itself — the garbled, repeated lines.
+  let lastRows = term.rows, lastCols = term.cols, queued = false
   const refit = () => {
     fit.fit()
+    if (term.rows === lastRows && term.cols === lastCols) return
+    lastRows = term.rows; lastCols = term.cols
     sub.perform("resize", { rows: term.rows, cols: term.cols })
   }
-  addEventListener("resize", refit)
+  const scheduleRefit = () => {
+    if (queued) return
+    queued = true
+    requestAnimationFrame(() => { queued = false; refit() })
+  }
+  addEventListener("resize", scheduleRefit)
 
-  // Mobile: the on-screen keyboard shrinks the visual viewport but not the layout
-  // (h-dvh) viewport, so the active input line ends up hidden behind the keyboard.
-  // Pin the page to the visible area and refit, keeping the cursor row on screen.
+  // Mobile keyboard: it shrinks the visual viewport but not the h-dvh layout
+  // viewport, so the input line hides behind the keyboard. Pin the page to the
+  // visible height when that height changes — but NOT on plain scroll, and never
+  // snap to the bottom, which would fight the user scrolling back through history.
   const vv = window.visualViewport
   if (vv) {
-    const syncViewport = () => {
-      document.body.style.height = vv.height + "px"
-      scrollTo(0, 0)
-      refit()
-      term.scrollToBottom()
-    }
-    vv.addEventListener("resize", syncViewport)
-    vv.addEventListener("scroll", syncViewport)
+    let lastH = Math.round(vv.height)
+    vv.addEventListener("resize", () => {
+      const h = Math.round(vv.height)
+      document.body.style.height = h + "px"
+      if (h !== lastH) { lastH = h; scheduleRefit() }
+    })
   }
+
+  // Touch scrollback: with tmux mouse mode on, the wheel scrolls claude's history
+  // — but phones emit no wheel, so there's no way to scroll up. Translate a
+  // one-finger drag into xterm's own scroll (local scrollback, no input sent to
+  // claude). A tap without drag falls through to xterm, so tap-to-focus still works.
+  const el = document.getElementById("terminal")
+  let dragY = null, dragging = false
+  el.addEventListener("touchstart", e => {
+    if (e.touches.length === 1) { dragY = e.touches[0].clientY; dragging = false }
+  }, { passive: true })
+  el.addEventListener("touchmove", e => {
+    if (dragY === null || e.touches.length !== 1) return
+    const dy = dragY - e.touches[0].clientY          // finger down (dy<0) → scroll up
+    if (!dragging && Math.abs(dy) < 8) return
+    dragging = true
+    e.preventDefault()                               // no native scroll / tmux drag-select
+    const lines = Math.trunc(dy / 16)                // ~16px per row
+    if (lines !== 0) { term.scrollLines(lines); dragY = e.touches[0].clientY }
+  }, { passive: false })
+  el.addEventListener("touchend", () => { dragY = null }, { passive: true })
+  el.addEventListener("touchcancel", () => { dragY = null }, { passive: true })
 
   // iOS/Android give no drag-select or double-tap paste over xterm's canvas, so
   // offer an explicit clipboard button on touch devices. term.paste respects the

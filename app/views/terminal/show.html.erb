@@ -15,7 +15,63 @@
          class="text-[10px] tracking-[0.14em] text-idle border border-idle/40 px-2.5 py-1 clip-tag hover:bg-idle/10">PAGES ↗</a>
     </span>
   </div>
+  <div id="update-bar" hidden class="flex items-center gap-2.5 px-3 py-2 border-b border-line-soft text-xs shrink-0 bg-live/5">
+    <span class="dot" data-state="live"></span>
+    <span id="update-msg" class="min-w-0 flex-1 text-strong">A new version of Appsmoothly is ready.</span>
+    <button id="update-go" type="button" title="Update the factory to the latest version"
+            class="shrink-0 text-[10px] tracking-[0.14em] text-live border border-live/50 px-2.5 py-1 clip-tag hover:bg-live/10 cursor-pointer disabled:opacity-50">UPDATE ↑</button>
+  </div>
   <div id="terminal" class="flex-1 min-h-0 overflow-hidden"></div>
 </div>
 
 <%= render "shared/terminal", token: @token %>
+
+<%# Watch for a newer factory version and offer a one-tap update. The heavy work
+    (pull, migrate, rebuild) and the service restart happen on the box; here we
+    poll, then reload onto the new version once it's up. %>
+<script type="module">
+  const bar = document.getElementById("update-bar")
+  const msg = document.getElementById("update-msg")
+  const go  = document.getElementById("update-go")
+  const CHECK = "<%= update_check_path %>"
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+
+  const poll = async () => {
+    try {
+      const r = await fetch(CHECK, { headers: { Accept: "application/json" }, cache: "no-store" })
+      return r.ok ? await r.json() : null
+    } catch { return null }               // server mid-restart, or offline
+  }
+
+  let applying = false
+  const check = async () => {
+    if (applying) return
+    const s = await poll()
+    if (s) bar.hidden = !s.available
+  }
+
+  go.addEventListener("click", async () => {
+    if (applying) return
+    applying = true
+    go.disabled = true
+    msg.textContent = "Updating… this page will reconnect in a moment."
+    try {
+      await fetch("<%= update_path %>", { method: "POST", headers: { "X-CSRF-Token": csrf } })
+    } catch {}
+    // Wait out the restart, then reload once the box is back on the new version.
+    const started = Date.now()
+    const wait = setInterval(async () => {
+      const s = await poll()
+      if (s && s.current && !s.available) { clearInterval(wait); location.reload() }
+      else if (Date.now() - started > 5 * 60 * 1000) {
+        clearInterval(wait)
+        applying = false
+        go.disabled = false
+        msg.textContent = "Update didn't finish — ask Claude in the terminal to check bin/update."
+      }
+    }, 3000)
+  })
+
+  check()
+  setInterval(check, 5 * 60 * 1000)
+</script>

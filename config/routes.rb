@@ -8,6 +8,11 @@ Rails.application.routes.draw do
   post "start/login" => "onboarding#login", as: :onboarding_login
   get  "start/link"  => "onboarding#link", as: :onboarding_link
 
+  # Keep the factory itself current: the page polls for a new version and offers
+  # a one-tap update (bin/update, then the service restarts under the new code).
+  get  "update/check" => "updates#check", as: :update_check
+  post "update"       => "updates#create", as: :update
+
   # Claude's own UI. Anything it writes (or symlinks) into the publish dir is a
   # page the user can open — an inbox, a list of versions, a chart — so it can
   # build whatever screen the moment needs instead of us shipping one.
