@@ -73,16 +73,30 @@
 
   // Voice: stream the browser mic into the box's virtual microphone (MicChannel
   // → PulseAudio pipe-source), so claude's OWN /voice records it and transcribes
-  // with Anthropic's model. Click 🎤 → it types /voice for you and arms the mic;
-  // then HOLD SPACE to talk (matches claude's push-to-talk) and audio is sent
-  // ONLY while Space is held. Click 🎤 again to leave voice mode.
+  // with Anthropic's model. Two ways to talk: HOLD the 🎤 button (works on phones,
+  // which have no SPACE key) — it arms voice mode and streams only while held — or
+  // TAP 🎤 to arm and then hold SPACE (desktop). Audio is sent ONLY while held.
   const mic = document.getElementById("mic")
   if (mic && navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext)) {
     mic.hidden = false
     let stream, ctx, node, gain, armed = false, sending = false
+    // Phones have no SPACE key to hold, so the mic button doubles as push-to-talk:
+    // holding it emulates the held-SPACE stream claude records from (a physical
+    // hold autorepeats spaces into the PTY; we reproduce that with an interval).
+    let spaceTimer = null
+    const talkStart = () => {
+      sending = true
+      sub.perform("input", { data: " " })
+      spaceTimer ??= setInterval(() => sub.perform("input", { data: " " }), 100)
+    }
+    const talkStop = () => {
+      sending = false
+      if (spaceTimer) { clearInterval(spaceTimer); spaceTimer = null }
+    }
     const disarm = () => {
+      talkStop()
       if (armed) sub.perform("input", { data: "\x1b" })      // Esc: leave claude's voice mode
-      armed = sending = false; mic.dataset.on = "false"
+      armed = false; mic.dataset.on = "false"
       try { node?.disconnect(); gain?.disconnect(); ctx?.close() } catch {}
       stream?.getTracks().forEach(t => t.stop())
       stream = ctx = node = gain = null
@@ -116,18 +130,73 @@
       { channel: "MicChannel", token: <%= token.to_json.html_safe %> },
       { rejected() { disarm(); mic.title = "Voice needs the box's audio set up first" } }
     )
-    mic.addEventListener("click", () => armed ? disarm() : arm())
-    // Gate the stream to Space-held. Capture phase so we still see it with the
-    // terminal focused; we never preventDefault, so Space still reaches claude.
+    // Hold the button to talk (arms if needed, streams while held); a quick tap
+    // toggles voice mode so desktop users can then hold SPACE. pointer events
+    // cover mouse, touch and pen with one path.
+    let holdTimer = null, holding = false
+    mic.addEventListener("pointerdown", e => {
+      e.preventDefault()                                     // no focus-steal / ghost click
+      holding = false
+      holdTimer = setTimeout(async () => {
+        holding = true
+        if (!armed) await arm()
+        if (armed) talkStart()
+      }, 180)
+    })
+    const release = () => {
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null }
+      if (holding) { talkStop(); holding = false }           // stay armed, like releasing SPACE
+      else armed ? disarm() : arm()                          // quick tap → toggle
+    }
+    mic.addEventListener("pointerup", release)
+    mic.addEventListener("pointercancel", () => {
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null }
+      if (holding) { talkStop(); holding = false }
+    })
+    // Desktop: gate the stream to Space-held. Capture phase so we still see it
+    // with the terminal focused; we never preventDefault, so Space still reaches
+    // claude (its own bytes drive the recording — no interval needed here).
     addEventListener("keydown", e => { if (armed && e.code === "Space") sending = true }, true)
     addEventListener("keyup", e => { if (armed && e.code === "Space") sending = false }, true)
-    addEventListener("blur", () => { sending = false })      // focus lost mid-hold → stop sending
+    addEventListener("blur", () => { talkStop() })           // focus lost mid-hold → stop
   }
 
   term.onData(data => sub.perform("input", { data }))
-  addEventListener("resize", () => {
+
+  const refit = () => {
     fit.fit()
     sub.perform("resize", { rows: term.rows, cols: term.cols })
-  })
+  }
+  addEventListener("resize", refit)
+
+  // Mobile: the on-screen keyboard shrinks the visual viewport but not the layout
+  // (h-dvh) viewport, so the active input line ends up hidden behind the keyboard.
+  // Pin the page to the visible area and refit, keeping the cursor row on screen.
+  const vv = window.visualViewport
+  if (vv) {
+    const syncViewport = () => {
+      document.body.style.height = vv.height + "px"
+      scrollTo(0, 0)
+      refit()
+      term.scrollToBottom()
+    }
+    vv.addEventListener("resize", syncViewport)
+    vv.addEventListener("scroll", syncViewport)
+  }
+
+  // iOS/Android give no drag-select or double-tap paste over xterm's canvas, so
+  // offer an explicit clipboard button on touch devices. term.paste respects the
+  // app's bracketed-paste mode (claude needs it for multi-line input).
+  const paste = document.getElementById("paste")
+  if (paste && navigator.clipboard?.readText && matchMedia("(pointer: coarse)").matches) {
+    paste.hidden = false
+    paste.addEventListener("click", async () => {
+      try {
+        const text = await navigator.clipboard.readText()
+        if (text) { term.paste(text); term.focus() }
+      } catch {} // clipboard blocked — nothing to paste
+    })
+  }
+
   term.focus()
 </script>

@@ -5,8 +5,10 @@
     <span class="dot" data-state="live"></span>
     <strong class="min-w-0 font-medium text-strong whitespace-nowrap overflow-hidden text-ellipsis">Claude</strong>
     <span class="flex items-center gap-1.5 shrink-0 ml-auto">
-      <button id="mic" type="button" hidden title="Talk to Claude — click, then hold SPACE while you speak"
-              class="text-[13px] leading-none px-2 py-1 clip-tag border border-idle/40 text-idle hover:bg-idle/10 cursor-pointer data-[on=true]:text-danger data-[on=true]:border-danger/60 data-[on=true]:bg-danger/5">🎤</button>
+      <button id="mic" type="button" hidden title="Talk to Claude — hold to speak (or click, then hold SPACE)"
+              class="text-[13px] leading-none px-2 py-1 clip-tag border border-idle/40 text-idle hover:bg-idle/10 cursor-pointer touch-none select-none data-[on=true]:text-danger data-[on=true]:border-danger/60 data-[on=true]:bg-danger/5">🎤</button>
+      <button id="paste" type="button" hidden title="Paste from your clipboard"
+              class="text-[13px] leading-none px-2 py-1 clip-tag border border-idle/40 text-idle hover:bg-idle/10 cursor-pointer">📋</button>
       <a target="_blank" href="<%= Factory.preview_url(request.host) %>" title="Open the test version of your app"
          class="text-[10px] tracking-[0.14em] text-idle border border-idle/40 px-2.5 py-1 clip-tag hover:bg-idle/10">TRY IT ↗</a>
       <a target="_blank" href="/ui/" title="Pages Claude made for you"
