@@ -1,0 +1,74 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# tmux `pipe-pane` streams the claude pane's output to our stdin. Each time
+# claude rings the terminal bell (0x07) — i.e. finishes a turn — we send the
+# "Claude is done" Web Push. Running in the tmux server means it fires even with
+# no browser attached, which is what lets a backgrounded phone get pinged.
+#
+# Deliberately lean (no Rails boot): it shares the same tmp/push files and
+# debounce stamp that app/models/push.rb writes, so the two triggers never
+# double-notify. If the box has no subscriptions or no push set up, it no-ops.
+
+root = File.expand_path("..", __dir__)
+Dir.chdir(root)
+require "bundler/setup"
+require "web-push"
+require "json"
+require "fileutils"
+
+DIR   = File.join(root, "tmp", "push")
+KEYS  = File.join(DIR, "vapid.json")
+SUBS  = File.join(DIR, "subscriptions.json")
+STAMP = File.join(DIR, "last-notified")
+DEBOUNCE = 4
+SUBJECT  = "mailto:claude@appsmoothly"
+
+def read_json(path)
+  JSON.parse(File.read(path)) if File.exist?(path)
+rescue StandardError
+  nil
+end
+
+# Shared file clock with Push#throttle! so the channel and this watcher collapse
+# into one notification per turn.
+def throttle
+  now = Time.now.to_f
+  last = File.exist?(STAMP) ? File.read(STAMP).to_f : 0.0
+  return false if now - last < DEBOUNCE
+
+  FileUtils.mkdir_p(DIR)
+  File.write(STAMP, now.to_s)
+  true
+rescue StandardError
+  true
+end
+
+def notify
+  vapid = read_json(KEYS) or return
+  subs  = read_json(SUBS) or return
+  return if subs.empty?
+
+  message = JSON.generate(title: "Claude", body: "Claude is done — your turn.")
+  alive = subs.reject do |sub|
+    WebPush.payload_send(
+      message: message, endpoint: sub["endpoint"],
+      p256dh: sub.dig("keys", "p256dh"), auth: sub.dig("keys", "auth"),
+      vapid: { subject: SUBJECT, public_key: vapid["public_key"], private_key: vapid["private_key"] },
+      urgency: "high"
+    )
+    false
+  rescue WebPush::ExpiredSubscription
+    true
+  rescue StandardError
+    false
+  end
+  File.write(SUBS, JSON.generate(alive)) if alive.size != subs.size
+rescue StandardError
+  nil
+end
+
+$stdin.binmode
+while (chunk = $stdin.read(1024))
+  notify if chunk.include?("\a") && throttle
+end

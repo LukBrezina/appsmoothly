@@ -11,7 +11,13 @@ class TerminalChannel < ApplicationCable::Channel
     @pty, @writer, @pid = PTY.spawn({ "TERM" => "xterm-256color" }, "tmux", "attach-session", "-t", tmux_name)
     Process.detach(@pid)
     @reader = Thread.new do
-      loop { transmit Base64.strict_encode64(@pty.readpartial(4096)) }
+      loop do
+        bytes = @pty.readpartial(4096)
+        transmit Base64.strict_encode64(bytes)
+        # BEL = claude finished a turn and wants you. Push off-thread so a slow
+        # push service never stalls terminal output; Push debounces the rest.
+        Thread.new { Push.notify_done! } if bytes.include?("\a")
+      end
     rescue EOFError, Errno::EIO
       # tmux client exited (detach / kill-session) — browser side just goes quiet
     end

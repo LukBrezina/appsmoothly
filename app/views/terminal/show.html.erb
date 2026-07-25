@@ -9,6 +9,8 @@
               class="text-[13px] leading-none px-2 py-1 clip-tag border border-idle/40 text-idle hover:bg-idle/10 cursor-pointer touch-none select-none data-[on=true]:text-danger data-[on=true]:border-danger/60 data-[on=true]:bg-danger/5">🎤</button>
       <button id="paste" type="button" hidden title="Paste from your clipboard"
               class="text-[13px] leading-none px-2 py-1 clip-tag border border-idle/40 text-idle hover:bg-idle/10 cursor-pointer">📋</button>
+      <button id="notify" type="button" hidden title="Get pinged when Claude finishes"
+              class="text-[13px] leading-none px-2 py-1 clip-tag border border-idle/40 text-idle hover:bg-idle/10 cursor-pointer">🔔</button>
       <a target="_blank" href="<%= Factory.preview_url(request.host) %>" title="Open the test version of your app"
          class="text-[10px] tracking-[0.14em] text-idle border border-idle/40 px-2.5 py-1 clip-tag hover:bg-idle/10">TRY IT ↗</a>
       <a target="_blank" href="/ui/" title="Pages Claude made for you"
@@ -74,4 +76,49 @@
 
   check()
   setInterval(check, 5 * 60 * 1000)
+</script>
+
+<%# Web Push: register the service worker and, once notifications are allowed,
+    subscribe so the box can ping this browser when Claude finishes a turn. On
+    iOS this only works from a Home-Screen install (its own permission store),
+    which is why permission is (re)requested here via the 🔔 button. %>
+<script type="module">
+  const VAPID = "<%= Push.public_key %>"
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+  const notifyBtn = document.getElementById("notify")
+
+  const b64ToBytes = (s) => {
+    const pad = "=".repeat((4 - (s.length % 4)) % 4)
+    const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"))
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0))
+  }
+
+  const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window
+
+  async function subscribe(reg) {
+    const sub = await reg.pushManager.getSubscription()
+           || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID) })
+    await fetch("<%= push_subscribe_path %>", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+      body: JSON.stringify({ subscription: sub })
+    })
+    window.__pushActive = true                 // the terminal's own bell handler backs off
+    notifyBtn.hidden = true
+  }
+
+  async function setup() {
+    if (!supported) return
+    let reg
+    try { reg = await navigator.serviceWorker.register("<%= pwa_service_worker_path %>") } catch { return }
+    if (Notification.permission === "granted") { try { await subscribe(reg) } catch {} ; return }
+    if (Notification.permission === "denied") return
+    notifyBtn.hidden = false                    // ask on tap (must be a user gesture)
+    notifyBtn.addEventListener("click", async () => {
+      try {
+        if (await Notification.requestPermission() === "granted") await subscribe(reg)
+      } catch {}
+    })
+  }
+  setup()
 </script>

@@ -6,6 +6,13 @@
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
 
+    <%# PWA: installable so iOS will allow notifications; theme + home-screen icon. %>
+    <link rel="manifest" href="<%= pwa_manifest_path %>">
+    <meta name="theme-color" content="#f4efe6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Appsmoothly">
+    <link rel="apple-touch-icon" href="/icon.png">
+
     <%= yield :head %>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">

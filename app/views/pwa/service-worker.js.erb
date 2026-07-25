@@ -1,0 +1,27 @@
+// Service worker for Web Push. The box sends a push when Claude finishes a turn
+// (see app/models/push.rb); this shows it as a notification — even while the app
+// is backgrounded, which is the only way to notify a phone.
+
+self.addEventListener("push", (event) => {
+  let data = {}
+  try { data = event.data ? event.data.json() : {} } catch (e) {}
+  const title = data.title || "Appsmoothly"
+  const body  = data.body  || "Claude is done — your turn."
+  event.waitUntil((async () => {
+    // Don't buzz if a window is already open and focused on the app.
+    const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true })
+    if (wins.some((w) => w.focused)) return
+    await self.registration.showNotification(title, {
+      body, icon: "/icon.png", badge: "/icon.png", tag: "claude-turn", renotify: true
+    })
+  })())
+})
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close()
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true })
+    for (const w of wins) { if ("focus" in w) return w.focus() }
+    if (self.clients.openWindow) return self.clients.openWindow("/")
+  })())
+})

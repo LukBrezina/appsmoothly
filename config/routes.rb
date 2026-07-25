@@ -13,6 +13,15 @@ Rails.application.routes.draw do
   get  "update/check" => "updates#check", as: :update_check
   post "update"       => "updates#create", as: :update
 
+  # Notify the browser when Claude finishes a turn. PWA install (manifest +
+  # root-scope service worker) is what makes this possible on iOS; the box sends
+  # the actual push (see Push + bin/bell-watch) since a backgrounded phone can't
+  # notice the bell itself.
+  get  "manifest.json"     => "pwa#manifest",       as: :pwa_manifest
+  get  "service-worker.js" => "pwa#service_worker", as: :pwa_service_worker
+  get  "push/key"          => "push#key",           as: :push_key
+  post "push/subscribe"    => "push#subscribe",     as: :push_subscribe
+
   # Claude's own UI. Anything it writes (or symlinks) into the publish dir is a
   # page the user can open — an inbox, a list of versions, a chart — so it can
   # build whatever screen the moment needs instead of us shipping one.

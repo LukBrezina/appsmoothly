@@ -43,7 +43,17 @@ module Agent
     system("tmux", "new-session", "-d", "-s", NAME, "-c", Factory.app_dir,
            *env.flat_map { |key, value| ["-e", "#{key}=#{value}"] })
     style(NAME)
+    watch_bell(NAME)
     true
+  end
+
+  # Stream the pane's output to bell-watch, which fires a Web Push when claude
+  # rings the bell (finishes a turn). pipe-pane lives in the tmux server, so this
+  # works even with no browser attached — the whole point of notifying a phone
+  # that's asleep. Best-effort: if the box has no push set up it just no-ops.
+  def watch_bell(target)
+    watcher = Rails.root.join("bin/bell-watch").to_s.shellescape
+    system("tmux", "pipe-pane", "-t", target, "-O", "exec #{watcher}")
   end
 
   # `--continue` picks the conversation back up (claude keys history on the

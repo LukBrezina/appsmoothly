@@ -65,9 +65,12 @@
     return true
   })
 
-  // Claude rings the terminal bell when it finishes a turn and wants you — turn
-  // that into a browser notification (permission is granted on the setup page).
+  // Claude rings the terminal bell when it finishes a turn and wants you. When
+  // Web Push is set up the box sends the notification itself (works backgrounded,
+  // and on phones) — so only fall back to a foreground-tab Notification here when
+  // push isn't active, to avoid notifying twice.
   term.onBell(() => {
+    if (window.__pushActive) return
     if (window.Notification?.permission === "granted" && document.hidden) {
       try { new Notification(document.title, { body: "Claude is done — your turn." }) } catch {}
     }

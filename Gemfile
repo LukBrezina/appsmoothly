@@ -19,6 +19,10 @@ gem "tailwindcss-rails"
 # Build JSON APIs with ease [https://github.com/rails/jbuilder]
 gem "jbuilder"
 
+# Web Push (VAPID) so the box can ping the browser when Claude finishes a turn —
+# the only way to notify a backgrounded phone (iOS has no tab notifications).
+gem "web-push"
+
 # Use Active Model has_secure_password [https://guides.rubyonrails.org/active_model_basics.html#securepassword]
 # gem "bcrypt", "~> 3.1.7"
 
