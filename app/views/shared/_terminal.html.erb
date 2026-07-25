@@ -206,8 +206,8 @@
   const el = document.getElementById("terminal")
   const screen = () => term.element?.querySelector(".xterm-screen") || term.element
   const rowPx = () => Math.max(10, el.clientHeight / (term.rows || 24))
-  const NOTCH_ROWS = 3          // finger-rows per wheel notch; tmux scrolls several lines per notch,
-                                // so damping here keeps a big swipe from flinging the history.
+  const NOTCH_ROWS = 1          // finger-rows per wheel notch — 1 tracks the finger closely; raise it
+                                // if a swipe flings the history, lower it if scrolling drags behind.
   let startY = null, lastY = null, dragging = false, acc = 0
   el.addEventListener("touchstart", e => {
     if (e.touches.length === 1) { startY = lastY = e.touches[0].clientY; dragging = false; acc = 0 }
