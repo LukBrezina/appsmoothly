@@ -1,7 +1,7 @@
 <% content_for :title, Factory.app_name %>
 
-<div class="flex-1 min-h-0 flex flex-col mx-4 sm:mx-6 my-3 border border-line bg-panel-2 clip-tag">
-  <div class="flex items-center gap-2.5 px-3 py-2 border-b border-line-soft text-xs shrink-0">
+<div class="flex-1 min-h-0 flex flex-col mx-1 sm:mx-6 my-1.5 sm:my-3 border border-line bg-panel-2 clip-tag">
+  <div class="flex items-center gap-2 sm:gap-2.5 px-2 sm:px-3 py-1.5 sm:py-2 border-b border-line-soft text-xs shrink-0">
     <span class="dot" data-state="live"></span>
     <strong class="min-w-0 font-medium text-strong whitespace-nowrap overflow-hidden text-ellipsis">Claude</strong>
     <span class="flex items-center gap-1.5 shrink-0 ml-auto">
@@ -15,7 +15,7 @@
          class="text-[10px] tracking-[0.14em] text-idle border border-idle/40 px-2.5 py-1 clip-tag hover:bg-idle/10">PAGES ↗</a>
     </span>
   </div>
-  <div id="update-bar" hidden class="flex items-center gap-2.5 px-3 py-2 border-b border-line-soft text-xs shrink-0 bg-live/5">
+  <div id="update-bar" hidden class="flex items-center gap-2 sm:gap-2.5 px-2 sm:px-3 py-1.5 sm:py-2 border-b border-line-soft text-xs shrink-0 bg-live/5">
     <span class="dot" data-state="live"></span>
     <span id="update-msg" class="min-w-0 flex-1 text-strong">A new version of Appsmoothly is ready.</span>
     <button id="update-go" type="button" title="Update the factory to the latest version"

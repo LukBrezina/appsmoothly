@@ -55,6 +55,13 @@
 .card:nth-child(n + 6) { animation-delay: 0.25s; }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
 
-/* FitAddon subtracts .xterm padding, not the container's */
+/* FitAddon subtracts .xterm padding, not the container's — so trimming this,
+   not the container, is what widens the usable grid. Tighter on phones. */
 .xterm { padding: 10px 4px 10px 14px; }
 .xterm-viewport { scrollbar-width: thin; scrollbar-color: var(--color-line) transparent; }
+@media (max-width: 640px) { .xterm { padding: 5px 3px 5px 5px; } }
+
+/* Own every vertical drag inside the terminal: no native scroll, no iOS/Chrome
+   pull-to-refresh (we translate drags into tmux scroll ourselves). */
+html, body { overscroll-behavior: none; }
+#terminal { touch-action: none; }
