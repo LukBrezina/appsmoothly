@@ -104,18 +104,30 @@
       stream = ctx = node = gain = null
     }
     const arm = async () => {
+      if (armed) return true
+      try {
+        // Create the context in the gesture; iOS ignores a requested 16 kHz and
+        // runs at the hardware rate, so we take the native rate and downsample.
+        ctx = new (window.AudioContext || window.webkitAudioContext)()
+      } catch { return false }
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
-      } catch { return } // mic denied
-      try {
-        ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 })
+        if (ctx.state === "suspended") await ctx.resume()    // iOS starts suspended
+        const ratio = ctx.sampleRate / 16000                 // e.g. 48000/16000 = 3 → box-average down
         const src = ctx.createMediaStreamSource(stream)
         node = ctx.createScriptProcessor(4096, 1, 1)         // deprecated but universal; no worklet asset
         node.onaudioprocess = e => {
-          if (!sending) return                               // only while Space is held
-          const f = e.inputBuffer.getChannelData(0)          // Float32 @16kHz mono
-          const pcm = new Int16Array(f.length)               // → s16le for PulseAudio
-          for (let i = 0; i < f.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, f[i] < 0 ? f[i] * 0x8000 : f[i] * 0x7fff))
+          if (!sending) return                               // only while talking
+          const f = e.inputBuffer.getChannelData(0)          // Float32 @ native rate, mono
+          const outLen = Math.max(1, Math.floor(f.length / ratio))
+          const pcm = new Int16Array(outLen)                 // → 16 kHz s16le for PulseAudio
+          for (let i = 0; i < outLen; i++) {
+            let sum = 0
+            const a = Math.floor(i * ratio), b = Math.min(f.length, Math.floor((i + 1) * ratio))
+            for (let j = a; j < b; j++) sum += f[j]
+            const s = sum / Math.max(1, b - a)
+            pcm[i] = Math.max(-32768, Math.min(32767, s < 0 ? s * 0x8000 : s * 0x7fff))
+          }
           const bytes = new Uint8Array(pcm.buffer)
           let bin = ""
           for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
@@ -126,35 +138,34 @@
         armed = true; mic.dataset.on = "true"
         sub.perform("input", { data: "/voice\r" })           // enter claude's voice mode for you
         term.focus()
-      } catch { disarm() }
+        return true
+      } catch { disarm(); return false } // mic denied / no gesture
     }
     const micSub = consumer.subscriptions.create(
       { channel: "MicChannel", token: <%= token.to_json.html_safe %> },
       { rejected() { disarm(); mic.title = "Voice needs the box's audio set up first" } }
     )
-    // Hold the button to talk (arms if needed, streams while held); a quick tap
-    // toggles voice mode so desktop users can then hold SPACE. pointer events
-    // cover mouse, touch and pen with one path.
-    let holdTimer = null, holding = false
+    // Hold the button to talk, streaming while held; a quick tap toggles voice
+    // mode so desktop users can then hold SPACE. arm() (getUserMedia + audio)
+    // MUST start inside the pointerdown gesture — iOS blocks the mic otherwise —
+    // so we begin arming immediately and only start streaming once it's ready
+    // and the finger is still down. pointer events cover mouse, touch and pen.
+    let pressed = false, pressAt = 0, armedBefore = false
     mic.addEventListener("pointerdown", e => {
       e.preventDefault()                                     // no focus-steal / ghost click
-      holding = false
-      holdTimer = setTimeout(async () => {
-        holding = true
-        if (!armed) await arm()
-        if (armed) talkStart()
-      }, 180)
+      pressed = true; pressAt = Date.now(); armedBefore = armed
+      arm().then(ok => { if (ok && pressed) talkStart() })   // stream once armed, if still held
     })
     const release = () => {
-      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null }
-      if (holding) { talkStop(); holding = false }           // stay armed, like releasing SPACE
-      else armed ? disarm() : arm()                          // quick tap → toggle
+      if (!pressed) return
+      pressed = false
+      const tap = Date.now() - pressAt < 250
+      talkStop()
+      if (tap && armedBefore) disarm()                       // tap while on → leave voice mode
+      // tap while off just armed it (stays on for SPACE / the next hold); a hold stays armed
     }
     mic.addEventListener("pointerup", release)
-    mic.addEventListener("pointercancel", () => {
-      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null }
-      if (holding) { talkStop(); holding = false }
-    })
+    mic.addEventListener("pointercancel", release)
     // Desktop: gate the stream to Space-held. Capture phase so we still see it
     // with the terminal focused; we never preventDefault, so Space still reaches
     // claude (its own bytes drive the recording — no interval needed here).
