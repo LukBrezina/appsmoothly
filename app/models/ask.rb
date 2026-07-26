@@ -15,9 +15,12 @@ require "securerandom"
 # per prompt. The MCP server (bin/mcp-ui) polls for the answer over loopback
 # HTTP, so the file IS the queue and no process has to stay resident.
 module Ask
-  DIR = Rails.root.join("tmp/ask")
+  # Per environment: the suite wipes this directory, and it must not take a
+  # question the user is looking at with it (see Push::DIR for the same trap).
+  DIR = Rails.root.join("tmp", Rails.env.test? ? "ask-test" : "ask")
   STREAM = "ui".freeze
   TTL = 24 * 60 * 60           # forget prompts nobody answered within a day
+  REPLAY = 60 * 60             # ...but only re-open recent ones on reconnect
   LOCK = Mutex.new
 
   module_function
@@ -43,6 +46,24 @@ module Ask
   end
 
   def answered?(prompt) = prompt.key?("answer") || prompt["dismissed"]
+
+  # Everything still waiting on the user, oldest first.
+  #
+  # A broadcast only reaches whoever is connected at that instant, and a phone
+  # drops the socket every time it backgrounds — so the pop-up was being lost
+  # precisely when the push notification was doing its job, and they'd open the
+  # app to nothing. UiChannel replays this on every (re)connect. Older than an
+  # hour and it's stale enough that appearing unbidden is just confusing.
+  def pending
+    Dir.glob(DIR.join("*.json"))
+       .filter_map { |path| JSON.parse(File.read(path)) rescue nil } # rubocop:disable Style/RescueModifier
+       .reject { |prompt| answered?(prompt) }
+       .select { |prompt| prompt["wait"] && Time.now.to_i - prompt["created_at"].to_i < REPLAY }
+       .sort_by { |prompt| prompt["created_at"].to_i }
+       .map { |prompt| prompt.slice("id", "title", "wait") }
+  rescue StandardError
+    []
+  end
 
   def find(id)
     return nil unless id.to_s.match?(/\A[0-9a-f]{16}\z/) # it lands in a file path

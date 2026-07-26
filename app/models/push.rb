@@ -11,7 +11,11 @@ require "web-push"
 # subscription on every load, so a wipe just re-populates. bin/bell-watch reads
 # the very same files from the tmux server for the no-browser-attached case.
 module Push
-  DIR   = Rails.root.join("tmp/push")
+  # Per environment, because the test suite wipes this directory wholesale and
+  # Rails.root does not change between them: sharing it meant `bin/rails test`
+  # deleting the box's VAPID keypair and every phone subscribed to it, silently
+  # unsubscribing the owner mid-session.
+  DIR   = Rails.root.join("tmp", Rails.env.test? ? "push-test" : "push")
   KEYS  = DIR.join("vapid.json")
   SUBS  = DIR.join("subscriptions.json")
   STAMP = DIR.join("last-notified")
