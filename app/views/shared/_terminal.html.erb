@@ -102,7 +102,7 @@
   const mic = document.getElementById("mic")
   if (mic && navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext)) {
     mic.hidden = false
-    let stream, ctx, node, gain, armed = false, sending = false
+    let stream, ctx, node, gain, src, armed = false, sending = false
     // Phones have no SPACE key to hold, so the mic button doubles as push-to-talk:
     // holding it emulates the held-SPACE stream claude records from (a physical
     // hold autorepeats spaces into the PTY; we reproduce that with an interval).
@@ -121,22 +121,24 @@
     const disarm = () => {
       talkStop()
       armed = false; mic.dataset.on = "false"
-      try { node?.disconnect(); gain?.disconnect(); ctx?.close() } catch {}
+      // Drop the microphone (so the phone's recording indicator goes out) but
+      // KEEP ctx/node/gain: see ensureGraph.
+      try { src?.disconnect() } catch {}
       stream?.getTracks().forEach(t => t.stop())
-      stream = ctx = node = gain = null
+      src = stream = null
     }
-    const arm = async () => {
-      if (armed) return true
-      try {
-        // Create the context in the gesture; iOS ignores a requested 16 kHz and
-        // runs at the hardware rate, so we take the native rate and downsample.
+    // One AudioContext for the life of the page. Creating and close()ing one per
+    // press is what made claude answer "no audio detected": after a few cycles
+    // iOS hands back a MediaStreamSource that is connected and pumping —
+    // onaudioprocess keeps firing on schedule — but every sample is zero. The
+    // symptom looks like broken plumbing and isn't; the fix is to stop churning
+    // the context.
+    const ensureGraph = async () => {
+      if (!ctx) {
         ctx = new (window.AudioContext || window.webkitAudioContext)()
-      } catch { return false }
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
-        if (ctx.state === "suspended") await ctx.resume()    // iOS starts suspended
-        const ratio = ctx.sampleRate / 16000                 // e.g. 48000/16000 = 3 → box-average down
-        const src = ctx.createMediaStreamSource(stream)
+        // iOS ignores a requested 16 kHz and runs at the hardware rate, so take
+        // the native rate and box-average down (e.g. 48000/16000 = 3).
+        const ratio = ctx.sampleRate / 16000
         node = ctx.createScriptProcessor(4096, 1, 1)         // deprecated but universal; no worklet asset
         node.onaudioprocess = e => {
           if (!sending) return                               // only while talking
@@ -156,7 +158,20 @@
           micSub.perform("chunk", { data: btoa(bin) })
         }
         gain = ctx.createGain(); gain.gain.value = 0         // silent sink so onaudioprocess fires
-        src.connect(node); node.connect(gain); gain.connect(ctx.destination)
+        node.connect(gain); gain.connect(ctx.destination)
+      }
+      if (ctx.state === "suspended") await ctx.resume()      // iOS suspends in the background
+    }
+    const arm = async () => {
+      if (armed) return true
+      try {
+        await ensureGraph()                                  // must start in the gesture
+      } catch { return false }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
+        if (ctx.state === "suspended") await ctx.resume()
+        src = ctx.createMediaStreamSource(stream)
+        src.connect(node)
         armed = true; mic.dataset.on = "true"
         term.focus()                                         // claude reads the held space
         return true
@@ -196,6 +211,35 @@
   }
 
   term.onData(data => sub.perform("input", { data }))
+
+  // Held Backspace. A phone keyboard fires ONE keydown however long you hold the
+  // key — there is no autorepeat — so deleting a mistyped line meant one tap per
+  // character. Reproduce what a hardware keyboard does: xterm sends the first
+  // \x7f itself, we send the rest until keyup. Guarded three ways, because a
+  // keyup we never receive would eat the whole line: e.repeat means a real
+  // keyboard is already autorepeating (desktop) and ours must stand down, and we
+  // stop on blur, on hide, and after a hard cap.
+  let bsDelay = null, bsTimer = null
+  const bsStop = () => {
+    if (bsDelay) { clearTimeout(bsDelay); bsDelay = null }
+    if (bsTimer) { clearInterval(bsTimer); bsTimer = null }
+  }
+  addEventListener("keydown", e => {
+    if (e.key !== "Backspace") return
+    if (e.repeat) return bsStop()                            // hardware autorepeat wins
+    if (bsDelay || bsTimer) return
+    bsDelay = setTimeout(() => {
+      bsDelay = null
+      let sent = 0
+      bsTimer = setInterval(() => {
+        if (++sent > 400) return bsStop()                    // lost keyup — never run away
+        sub.perform("input", { data: "\x7f" })
+      }, 55)
+    }, 400)                                                  // same wait before repeat kicks in
+  }, true)
+  addEventListener("keyup", e => { if (e.key === "Backspace") bsStop() }, true)
+  addEventListener("blur", bsStop)
+  document.addEventListener("visibilitychange", () => { if (document.hidden) bsStop() })
 
   // Resize the PTY only when the grid actually changes, and coalesce bursts into
   // one animation frame. Mobile fires resize/visualViewport events in storms
