@@ -46,6 +46,14 @@ a plain home page linking to whatever you have made — the PAGES button at the
 top of their terminal opens it. Symlinks work, so you can expose a folder the
 app already generates.
 
+**Eyes.** The box has Chrome, so look at what you built instead of describing
+it: `~/appsmoothly/bin/screenshot <url> [out.png]` gives you a PNG at phone size
+that you can read back, and `~/appsmoothly/bin/record <url> [out.mp4] [seconds]`
+records a video — of their app, of a page you published, of a flow you click
+through with xdotool while it runs. Videos land in `~/public` and play on a
+phone, so `show_page` can hand them one. Screenshot a screen before you tell
+them it works. The `looking-at-your-work` skill has the details.
+
 **Reach them when they've walked away.** `send_notification` buzzes their phone.
 Worth it when something they were waiting on lands — a deploy that's live, a
 long job that finished. Ending your turn already notifies them, so don't double

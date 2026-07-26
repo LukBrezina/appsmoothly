@@ -99,6 +99,7 @@ Tuesday" runs on.
 | `app/models/mic.rb` | the box's virtual microphone (PulseAudio pipe-source) |
 | `app/models/ask.rb` | claude's pop-up UI: one JSON file per prompt, answered by the browser |
 | `bin/mcp-ui` | the tools claude gets — `ask_user`, `show_page`, `ask_result`, `send_notification` |
+| `bin/screenshot`, `bin/record` | claude's eyes: headless Chrome for stills, Xvfb + ffmpeg for video |
 | `config/skills/` | skills symlinked into `~/.claude/skills` at session start |
 | `app/channels/terminal_channel.rb` | PTY ↔ ActionCable bridge (`tmux attach`), base64 frames, signed-token auth |
 | `app/channels/mic_channel.rb` | browser mic → the FIFO claude's `/voice` records from |

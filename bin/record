@@ -1,0 +1,69 @@
+#!/bin/bash
+# Record a video of a page, the way the user will see it.
+#
+#   bin/record <url> [out.mp4] [seconds] [WIDTHxHEIGHT]
+#
+# Defaults to ~/public/recording.mp4 at phone size for 10 seconds, and prints
+# the /ui/ address it is published at — so you can hand it straight to
+# show_page, or drop it in a page of your own with a <video> tag.
+#
+# Why a real X display instead of headless stills: headless Chrome can only hand
+# back one frame at a time, so anything that moves — a transition, a spinner, a
+# form being filled in — is exactly what you would miss. Xvfb gives Chrome a
+# screen to draw on and ffmpeg records that screen, so what lands in the file is
+# what a person would have watched.
+#
+# While it records, the page is live: `DISPLAY=$display xdotool ...` can click
+# and type through a flow, and the recording catches it. The display name is
+# printed for that reason.
+set -euo pipefail
+
+url="${1:?usage: bin/record <url> [out.mp4] [seconds] [WIDTHxHEIGHT]}"
+out="${2:-$HOME/public/recording.mp4}"
+secs="${3:-10}"
+size="${4:-390x844}"
+width="${size%x*}"
+height="${size#*x}"
+
+# Screen depth 24 and an even geometry: H.264 refuses odd dimensions, and a
+# phone width like 391 would otherwise fail deep inside ffmpeg.
+width=$(( width - width % 2 ))
+height=$(( height - height % 2 ))
+
+display=":$(( 90 + RANDOM % 100 ))"
+mkdir -p "$(dirname "$out")"
+
+xvfb_pid= chrome_pid=
+cleanup() {
+  [ -n "$chrome_pid" ] && kill "$chrome_pid" 2>/dev/null || true
+  [ -n "$xvfb_pid" ] && kill "$xvfb_pid" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+Xvfb "$display" -screen 0 "${width}x${height}x24" -nolisten tcp >/dev/null 2>&1 &
+xvfb_pid=$!
+sleep 1
+
+# --app strips the address bar and tabs, so the recording is the page and
+# nothing else. --no-sandbox because this box has no user-namespace sandbox to
+# offer and the only pages we ever open are our own.
+DISPLAY="$display" google-chrome \
+  --no-sandbox --disable-gpu --disable-dev-shm-usage \
+  --window-position=0,0 --window-size="${width},${height}" \
+  --app="$url" >/dev/null 2>&1 &
+chrome_pid=$!
+sleep 3   # first paint, fonts, whatever the page fetches
+
+echo "recording ${width}x${height} for ${secs}s on $display (xdotool can drive it)" >&2
+
+# yuv420p + faststart are not optional: Safari refuses to play anything else,
+# and the person watching this is usually on an iPhone.
+ffmpeg -hide_banner -loglevel error -y \
+  -f x11grab -video_size "${width}x${height}" -framerate 15 -i "$display" \
+  -t "$secs" -c:v libx264 -preset veryfast -pix_fmt yuv420p -movflags +faststart \
+  "$out"
+
+echo "$out"
+case "$out" in
+  "$HOME/public/"*) echo "/ui/${out#"$HOME"/public/}" ;;
+esac
