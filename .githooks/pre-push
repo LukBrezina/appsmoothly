@@ -1,0 +1,8 @@
+#!/bin/sh
+# Local CI. There is no hosted runner: the checks in config/ci.rb are the build,
+# and they run here so a red tree can never reach the remote in the first place.
+# `gh signoff` (inside bin/ci) then puts the green commit status on GitHub.
+#
+# Enabled by `git config core.hooksPath .githooks`, which bin/setup does.
+# In a genuine emergency, `git push --no-verify` skips it.
+exec bin/ci

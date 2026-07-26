@@ -97,6 +97,9 @@ Tuesday" runs on.
 | `app/models/agent.rb` | the one claude session: `alive?`, `ensure!`, the launch command, tmux styling |
 | `app/models/onboarding.rb` | first run: is claude signed in, the sign-in terminal, the sign-in URL scraper, the starter → first prompt |
 | `app/models/mic.rb` | the box's virtual microphone (PulseAudio pipe-source) |
+| `app/models/ask.rb` | claude's pop-up UI: one JSON file per prompt, answered by the browser |
+| `bin/mcp-ui` | the tools claude gets — `ask_user`, `show_page`, `ask_result`, `send_notification` |
+| `config/skills/` | skills symlinked into `~/.claude/skills` at session start |
 | `app/channels/terminal_channel.rb` | PTY ↔ ActionCable bridge (`tmux attach`), base64 frames, signed-token auth |
 | `app/channels/mic_channel.rb` | browser mic → the FIFO claude's `/voice` records from |
 | `app/views/terminal/show.html.erb` | the product: terminal + 🎤 + TRY IT + PAGES |
@@ -138,6 +141,19 @@ Closing the tab detaches (HUP), never kills.
 (`APPSMOOTHLY_PUBLISH_DIR`). Claude writes or symlinks HTML there and hands the
 user a link; `index.html` is its home page, behind the PAGES button. Path
 traversal is blocked by Rack; symlinks are followed on purpose.
+
+### CI is local
+
+There is no hosted runner. `config/ci.rb` is the build, `.githooks/pre-push`
+runs it before anything reaches the remote (`bin/setup` points git at the hooks
+— a fresh clone needs that once), and `gh signoff` sets the green commit status
+GitHub would otherwise be waiting on. Install it once with
+`gh extension install basecamp/gh-signoff`.
+
+A status can only attach to a commit GitHub already has, so `bin/ci` signs off
+only when HEAD is on a remote branch. `bin/ship` is `git push` (checks run in
+the hook) followed by the signoff. `--no-verify` skips the gate if you truly
+must.
 
 ### Gotchas (learned the hard way — don't relearn them)
 

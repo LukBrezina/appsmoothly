@@ -1,0 +1,24 @@
+#!/bin/sh
+# Look at a page the way the user will.
+#
+#   bin/screenshot <url> [out.png] [width,height]
+#
+# Defaults to a phone-sized viewport, because that is what they are holding.
+# Use it to check the app you are building, or a page you wrote into ~/public,
+# before telling them it looks right — you can read the PNG back.
+#
+# --no-sandbox: there is no user-namespace sandbox to be had on this box, and
+# the only pages we ever load are our own.
+set -e
+url="${1:?usage: bin/screenshot <url> [out.png] [width,height]}"
+out="${2:-tmp/screenshot.png}"
+size="${3:-390,844}"
+
+mkdir -p "$(dirname "$out")"
+exec google-chrome \
+  --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+  --user-data-dir="$(mktemp -d)" \
+  --virtual-time-budget=5000 \
+  --window-size="$size" \
+  --screenshot="$out" \
+  "$url"

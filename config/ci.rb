@@ -14,11 +14,20 @@ CI.run do
   # Optional: Run system tests
   # step "Tests: System", "bin/rails test:system"
 
-  # Optional: set a green GitHub commit status to unblock PR merge.
-  # Requires the `gh` CLI and `gh extension install basecamp/gh-signoff`.
-  # if success?
-  #   step "Signoff: All systems go. Ready for merge and deploy.", "gh signoff"
-  # else
-  #   failure "Signoff: CI failed. Do not merge or deploy.", "Fix the issues and try again."
-  # end
+  # There is no hosted CI: this file IS the build. .githooks/pre-push runs it
+  # before every push, and `gh signoff` puts the same green commit status on
+  # GitHub that a rented runner would have (gh extension install
+  # basecamp/gh-signoff).
+  #
+  # A status can only be attached to a commit GitHub already has, and the usual
+  # run of this file is the one *before* a push — so sign off only once the
+  # commit is on a remote branch, and say so plainly the rest of the time.
+  # bin/ship does the two halves in the right order.
+  if success?
+    step "Signoff: All systems go. Ready for merge and deploy.",
+         "if git branch -r --contains HEAD 2>/dev/null | grep -q .; then gh signoff; " \
+         "else echo 'Green. Not pushed yet — bin/ship pushes, then signs off.'; fi"
+  else
+    failure "Signoff: CI failed. Do not merge or deploy.", "Fix the issues and try again."
+  end
 end

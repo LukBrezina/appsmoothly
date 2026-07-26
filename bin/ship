@@ -1,0 +1,10 @@
+#!/bin/sh
+# Push, then sign off.
+#
+# The pre-push hook has already run the full build by the time git talks to the
+# remote, so this doesn't re-run it — it just does the half that has to happen
+# *after* the commit lands, since a GitHub status can only be attached to a
+# commit GitHub already has. Takes the same arguments as `git push`.
+set -e
+git push "$@"
+gh signoff

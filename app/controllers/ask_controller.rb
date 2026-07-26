@@ -53,14 +53,12 @@ class AskController < ApplicationController
 
   private
 
-  # Whatever shape claude's form had — its field names are its own invention, so
-  # there is nothing to whitelist against. Flattened to a plain Hash because
-  # Parameters serialises to its own inspect output, and this ends up as JSON in
-  # front of claude.
-  def answer_value
-    raw = params[:answer]
-    raw.is_a?(ActionController::Parameters) ? raw.permit!.to_h : raw
-  end
+  # Whatever shape claude's form had — the field names are its own invention, so
+  # there is nothing to permit against. Read straight off the parsed body rather
+  # than through params: this is inert data on its way to becoming JSON in front
+  # of claude, never attributes, and Parameters would serialise as its own
+  # inspect output anyway.
+  def answer_value = request.request_parameters["answer"]
 
   # Everything the page needs to talk back, injected rather than required of
   # claude: submitting any form posts it here and closes the pop-up.

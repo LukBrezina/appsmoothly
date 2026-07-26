@@ -15,6 +15,12 @@ FileUtils.chdir APP_ROOT do
   puts "== Installing dependencies =="
   system("bundle check") || system!("bundle install")
 
+  # Local CI instead of a hosted runner: .githooks/pre-push runs bin/ci before
+  # anything can reach the remote. A fresh clone has to be told where the hooks
+  # live — git will not pick them up on its own.
+  puts "\n== Enabling the pre-push build =="
+  system! "git config core.hooksPath .githooks"
+
   # puts "\n== Copying sample files =="
   # unless File.exist?("config/database.yml")
   #   FileUtils.cp "config/database.yml.sample", "config/database.yml"
