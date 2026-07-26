@@ -42,10 +42,13 @@ module Agent
   # The box's own tools — show the user a page, ask them a question, buzz their
   # phone (bin/mcp-ui). These have to be tools claude reaches for mid-thought,
   # not something the factory does to it from outside.
+  # RbConfig.ruby, not "ruby": claude spawns this itself, and if its PATH does
+  # not happen to include the rbenv shims the server fails to start and the
+  # tools quietly do not exist — the hardest kind of missing to notice.
   def write_mcp_config!
     FileUtils.mkdir_p(MCP_CONFIG.dirname)
     File.write(MCP_CONFIG, JSON.generate(
-      mcpServers: { appsmoothly: { command: "ruby", args: [Rails.root.join("bin/mcp-ui").to_s] } }
+      mcpServers: { appsmoothly: { command: RbConfig.ruby, args: [Rails.root.join("bin/mcp-ui").to_s] } }
     ))
   rescue StandardError
     nil # a box without the pop-up tools still works; it just has to type instead
