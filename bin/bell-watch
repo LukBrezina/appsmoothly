@@ -22,7 +22,10 @@ KEYS  = File.join(DIR, "vapid.json")
 SUBS  = File.join(DIR, "subscriptions.json")
 STAMP = File.join(DIR, "last-notified")
 DEBOUNCE = 4
-SUBJECT  = "mailto:claude@appsmoothly"
+# Must match app/models/push.rb: Apple rejects a VAPID subject whose domain has
+# no TLD with 403 BadJwtToken.
+DOMAIN   = ENV["APPSMOOTHLY_DOMAIN"].to_s
+SUBJECT  = "mailto:claude@#{DOMAIN.empty? ? "appsmoothly.com" : DOMAIN}"
 
 def read_json(path)
   JSON.parse(File.read(path)) if File.exist?(path)

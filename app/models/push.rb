@@ -16,7 +16,11 @@ module Push
   SUBS  = DIR.join("subscriptions.json")
   STAMP = DIR.join("last-notified")
   DEBOUNCE = 4 # seconds — collapse the two triggers (channel sees the bell + bell-watch)
-  SUBJECT  = "mailto:claude@appsmoothly".freeze
+  # The VAPID `sub` claim. Apple validates it and answers 403 BadJwtToken for an
+  # address whose domain has no TLD, so it has to be a real mailto (or https
+  # URL) — the box's own domain is the one thing we always have. Keep
+  # bin/bell-watch's copy in step.
+  SUBJECT  = "mailto:claude@#{ENV["APPSMOOTHLY_DOMAIN"].presence || "appsmoothly.com"}".freeze
   LOCK = Mutex.new
 
   module_function

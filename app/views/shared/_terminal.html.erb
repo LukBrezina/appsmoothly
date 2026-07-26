@@ -37,7 +37,19 @@
     {
       connected() { this.perform("resize", { rows: term.rows, cols: term.cols }) },
       received(data) { term.write(Uint8Array.from(atob(data), c => c.charCodeAt(0))) },
-      rejected() { term.write("\r\nCouldn't connect — reload the page to try again.\r\n") },
+      // The token lives 12 hours, but an installed PWA sits in the background
+      // for days and then wakes up with an expired one — the tab looks alive
+      // while the terminal AND the mic are both dead. Reloading mints a fresh
+      // token, so do that once; if a second rejection follows straight away the
+      // cause isn't staleness, so say so instead of looping.
+      rejected() {
+        const last = Number(sessionStorage.getItem("asm-retoken") || 0)
+        if (Date.now() - last > 30000) {
+          sessionStorage.setItem("asm-retoken", String(Date.now()))
+          return location.reload()
+        }
+        term.write("\r\nCouldn't connect — reload the page to try again.\r\n")
+      },
       disconnected() { term.write("\r\nConnection lost — reload the page to reconnect.\r\n") }
     }
   )
@@ -77,10 +89,16 @@
   })
 
   // Voice: stream the browser mic into the box's virtual microphone (MicChannel
-  // → PulseAudio pipe-source), so claude's OWN /voice records it and transcribes
-  // with Anthropic's model. Two ways to talk: HOLD the 🎤 button (works on phones,
-  // which have no SPACE key) — it arms voice mode and streams only while held — or
-  // TAP 🎤 to arm and then hold SPACE (desktop). Audio is sent ONLY while held.
+  // → PulseAudio pipe-source), so claude's OWN voice mode records it and
+  // transcribes with Anthropic's model. Two ways to talk: HOLD the 🎤 button
+  // (works on phones, which have no SPACE key) — or TAP 🎤 to arm and then hold
+  // SPACE (desktop). Audio is sent ONLY while held.
+  //
+  // We never type a slash command into claude. Voice mode is simply left enabled
+  // in config/claude-settings.json, so the ONLY thing this has to reproduce is a
+  // held space. Typing "/voice" here used to toggle voice mode OFF (the bare
+  // form is a toggle, and the setting already had it on), which is why the
+  // button never once managed to start a recording.
   const mic = document.getElementById("mic")
   if (mic && navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext)) {
     mic.hidden = false
@@ -98,9 +116,10 @@
       sending = false
       if (spaceTimer) { clearInterval(spaceTimer); spaceTimer = null }
     }
+    // No Esc on release: in claude that is chat:cancel, so letting go of the
+    // button would abort the turn that is running.
     const disarm = () => {
       talkStop()
-      if (armed) sub.perform("input", { data: "\x1b" })      // Esc: leave claude's voice mode
       armed = false; mic.dataset.on = "false"
       try { node?.disconnect(); gain?.disconnect(); ctx?.close() } catch {}
       stream?.getTracks().forEach(t => t.stop())
@@ -139,8 +158,7 @@
         gain = ctx.createGain(); gain.gain.value = 0         // silent sink so onaudioprocess fires
         src.connect(node); node.connect(gain); gain.connect(ctx.destination)
         armed = true; mic.dataset.on = "true"
-        sub.perform("input", { data: "/voice\r" })           // enter claude's voice mode for you
-        term.focus()
+        term.focus()                                         // claude reads the held space
         return true
       } catch { disarm(); return false } // mic denied / no gesture
     }
