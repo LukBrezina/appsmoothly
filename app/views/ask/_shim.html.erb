@@ -1,0 +1,52 @@
+<%# Appended to every page claude pops up. It exists so claude can write a plain,
+    semantic form — <input name="...">, a <button> — and never think about how
+    the answer travels. Any submit becomes the tool call's return value. %>
+<script>
+  (function () {
+    var id = <%= id.to_json.html_safe %>
+    var sent = false
+
+    var send = function (answer, dismissed) {
+      if (sent) return
+      sent = true
+      fetch("/ask/" + id + "/answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer: answer, dismissed: !!dismissed })
+      }).catch(function () {}).then(function () {
+        parent.postMessage({ appsmoothlyAsk: "done", id: id }, "*")
+      })
+    }
+
+    // Multiple values under one name (checkboxes) collapse to an array, which is
+    // what claude means by them; everything else stays a plain string.
+    document.addEventListener("submit", function (e) {
+      var form = e.target
+      if (!form || form.tagName !== "FORM") return
+      e.preventDefault()
+      var answer = {}
+      new FormData(form).forEach(function (value, key) {
+        if (key in answer) answer[key] = [].concat(answer[key], value)
+        else answer[key] = value
+      })
+      // A named submit button is how you say "which of these did they press".
+      if (e.submitter && e.submitter.name) answer[e.submitter.name] = e.submitter.value
+      send(answer, false)
+    })
+
+    // A bare <button data-answer="yes"> with no form around it works too — the
+    // shortest possible way to ask something.
+    document.addEventListener("click", function (e) {
+      var el = e.target.closest("[data-answer]")
+      if (!el) return
+      e.preventDefault()
+      send({ answer: el.getAttribute("data-answer") }, false)
+    })
+
+    // The pop-up's own close button asks us to report a dismissal, so claude
+    // learns "they walked away" instead of waiting out the timeout.
+    addEventListener("message", function (e) {
+      if (e.data && e.data.appsmoothlyAsk === "dismiss") send(null, true)
+    })
+  })()
+</script>

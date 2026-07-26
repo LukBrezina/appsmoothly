@@ -14,9 +14,14 @@ module Agent
   # browser terminal), /voice on, auto-approve — and the box briefing that
   # makes claude talk like a person and know how this machine is wired.
   # Per-launch via flags, so the box's global claude config is never touched.
+  # Written at session start rather than committed, so the paths inside it are
+  # this box's own and not wherever the factory happened to be checked out.
+  MCP_CONFIG = Rails.root.join("tmp/mcp.json")
+
   FLAGS = [
     "--permission-mode auto",
     "--settings #{Rails.root.join('config/claude-settings.json').to_s.shellescape}",
+    "--mcp-config #{MCP_CONFIG.to_s.shellescape}",
     "--append-system-prompt-file #{Rails.root.join('config/claude-brief.md').to_s.shellescape}"
   ].join(" ").freeze
 
@@ -28,8 +33,22 @@ module Agent
   # claude if the user quit out of it and left a bare shell behind.
   def ensure!(prompt: nil)
     Factory.ensure_dirs!
+    write_mcp_config!
+    Factory.install_skills!
     return start(prompt) if new_session!
     start(prompt) if at_a_shell?
+  end
+
+  # The box's own tools — show the user a page, ask them a question, buzz their
+  # phone (bin/mcp-ui). These have to be tools claude reaches for mid-thought,
+  # not something the factory does to it from outside.
+  def write_mcp_config!
+    FileUtils.mkdir_p(MCP_CONFIG.dirname)
+    File.write(MCP_CONFIG, JSON.generate(
+      mcpServers: { appsmoothly: { command: "ruby", args: [Rails.root.join("bin/mcp-ui").to_s] } }
+    ))
+  rescue StandardError
+    nil # a box without the pop-up tools still works; it just has to type instead
   end
 
   # Returns true when it actually created the session.

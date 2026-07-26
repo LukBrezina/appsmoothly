@@ -1,5 +1,7 @@
 {
   "theme": "light",
   "voice": { "enabled": true, "mode": "hold" },
-  "voiceEnabled": true
+  "voiceEnabled": true,
+  "permissions": { "allow": ["mcp__appsmoothly"] },
+  "env": { "MCP_TIMEOUT": "30000", "MCP_TOOL_TIMEOUT": "3600000" }
 }

@@ -26,6 +26,22 @@
   <div id="terminal" class="flex-1 min-h-0 overflow-hidden"></div>
 </div>
 
+<%# Claude's pop-up. It writes a page, calls the ask tool, and the box shows it
+    here over the terminal — a form with big buttons instead of a paragraph
+    asking a non-programmer to type a decision. What they fill in goes straight
+    back to claude as that tool call's return value (see Ask + bin/mcp-ui). %>
+<div id="ask-modal" hidden class="fixed inset-0 z-50 flex bg-ink/40 p-2 sm:p-6">
+  <div class="m-auto w-full max-w-2xl h-full sm:h-[85dvh] flex flex-col bg-bg border border-strong/40 clip-tag overflow-hidden">
+    <div class="flex items-center gap-2 px-3 py-2 border-b border-line-soft text-xs shrink-0 bg-panel">
+      <span class="dot" data-state="live"></span>
+      <strong id="ask-title" class="min-w-0 flex-1 truncate font-medium text-strong">Claude needs you</strong>
+      <button id="ask-close" type="button" title="Close without answering"
+              class="text-[13px] leading-none px-2 py-1 clip-tag border border-idle/40 text-idle hover:bg-idle/10 cursor-pointer">✕</button>
+    </div>
+    <iframe id="ask-frame" title="Claude's question" class="flex-1 w-full border-0 bg-bg"></iframe>
+  </div>
+</div>
+
 <%= render "shared/terminal", token: @token %>
 
 <%# Watch for a newer factory version and offer a one-tap update. The heavy work

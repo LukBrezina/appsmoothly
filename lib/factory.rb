@@ -34,6 +34,25 @@ module Factory
   def fresh? = !Dir.exist?(app_dir) || Dir.empty?(app_dir)
   def ensure_dirs! = FileUtils.mkdir_p([app_dir, publish_dir])
 
+  # Skills the box ships with — chiefly how to build a pop-up a non-programmer
+  # can actually use. Symlinked rather than copied, so a factory update reaches
+  # claude without anyone remembering to re-copy them.
+  def skills_dir = Rails.root.join("config/skills")
+
+  def install_skills!
+    target = File.expand_path("~/.claude/skills")
+    FileUtils.mkdir_p(target)
+    Dir.children(skills_dir).each do |name|
+      link = File.join(target, name)
+      source = skills_dir.join(name).to_s
+      next if File.symlink?(link) && File.readlink(link) == source
+      FileUtils.rm_rf(link)
+      FileUtils.ln_s(source, link)
+    end
+  rescue StandardError
+    nil # a box without the skills still works, it just writes plainer pages
+  end
+
   def verifier = Rails.application.message_verifier("rails_app_factory")
 
   def clean_tmux!

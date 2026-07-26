@@ -212,6 +212,40 @@
 
   term.onData(data => sub.perform("input", { data }))
 
+  // Claude's pop-up UI: it asks the box to show a page it wrote, we put it over
+  // the terminal, and the shim inside the page reports the answer back (see
+  // Ask + views/ask/_shim). The terminal keeps running underneath — the pop-up
+  // is a question, not a mode.
+  const askModal = document.getElementById("ask-modal")
+  if (askModal) {
+    const askFrame = document.getElementById("ask-frame")
+    const askTitle = document.getElementById("ask-title")
+    const askClose = () => {
+      askModal.hidden = true
+      askFrame.src = "about:blank"                           // stop whatever it was doing
+      term.focus()
+    }
+    consumer.subscriptions.create(
+      { channel: "UiChannel", token: <%= token.to_json.html_safe %> },
+      {
+        received(p) {
+          askTitle.textContent = p.title || "Claude needs you"
+          askFrame.src = `/ask/${encodeURIComponent(p.id)}`
+          askModal.hidden = false
+        }
+      }
+    )
+    // The page answered — the tool call claude is sitting in has its result.
+    addEventListener("message", e => {
+      if (e.data && e.data.appsmoothlyAsk === "done") askClose()
+    })
+    // Closing without answering still tells claude, so it stops waiting on them.
+    document.getElementById("ask-close").addEventListener("click", () => {
+      askFrame.contentWindow?.postMessage({ appsmoothlyAsk: "dismiss" }, "*")
+      setTimeout(askClose, 60)                               // let the shim post first
+    })
+  }
+
   // Held Backspace. A phone keyboard fires ONE keydown however long you hold the
   // key — there is no autorepeat — so deleting a mistyped line meant one tap per
   // character. Reproduce what a hardware keyboard does: xterm sends the first

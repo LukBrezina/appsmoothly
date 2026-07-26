@@ -1,0 +1,195 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# The box's own tools, handed to the claude running in the terminal: show the
+# user a page, ask them a question and get the answer back, ping their phone.
+#
+# Why a separate process instead of the factory calling into claude: tools have
+# to be claude's to reach for, mid-thought, without being told. So this speaks
+# MCP over stdio (claude spawns it, see config/mcp.json) and turns each call
+# into a loopback request to the factory, which owns the browser connection.
+#
+# Deliberately stdlib-only — no bundler, no Rails boot. The tmux session strips
+# the factory's bundler env (Factory::BUNDLER_ENV), so anything else would be a
+# fight, and a tool that fails to start is a tool claude silently stops having.
+
+require "json"
+require "net/http"
+require "uri"
+
+BASE = URI(ENV["APPSMOOTHLY_FACTORY_URL"] || "http://127.0.0.1:3000")
+# Each poll holds the connection open server-side, so this is a wait, not a
+# spin: at most a handful of requests even for someone who takes five minutes.
+POLL = 25
+PROTOCOL = "2024-11-05"
+
+def http(request)
+  Net::HTTP.start(BASE.host, BASE.port, read_timeout: POLL + 15) { |c| c.request(request) }
+end
+
+def post(path, body)
+  request = Net::HTTP::Post.new(path, "Content-Type" => "application/json")
+  request.body = JSON.generate(body)
+  http(request)
+end
+
+def get(path)
+  http(Net::HTTP::Get.new(path))
+end
+
+# Show a page and, when asked to, wait for the person to answer it.
+def open_page(args, wait:)
+  path = args["path"].to_s
+  return text("No path given. Write the HTML into ~/public first, then pass its name.") if path.empty?
+
+  response = post("/ask", { path: path, title: args["title"], wait: wait })
+  return text("Couldn't show that page: #{response.code}. Is the file in ~/public?") unless response.is_a?(Net::HTTPSuccess)
+
+  id = JSON.parse(response.body)["id"]
+  return text("Shown to them. They can read it at their leisure — you weren't waiting on an answer.") unless wait
+
+  await(id, args.fetch("timeout_seconds", 600).to_i)
+end
+
+# Poll until they answer, they dismiss it, or we run out of patience.
+def await(id, timeout)
+  deadline = Time.now + timeout.clamp(5, 3600)
+  loop do
+    response = get("/ask/#{id}/result?timeout=#{POLL}")
+    return text("That question is gone — it may have expired.") unless response.is_a?(Net::HTTPSuccess)
+
+    result = JSON.parse(response.body)
+    if result["dismissed"]
+      return text("They closed it without answering. Ask in the terminal instead, or leave it for now.")
+    elsif result["status"] == "answered"
+      return text(JSON.pretty_generate(result["answer"]))
+    elsif Time.now >= deadline
+      return text("No answer yet — they're probably away. The page is still up; " \
+                  "call ask_result with id #{id} to pick the answer up later.")
+    end
+  end
+end
+
+def text(string) = { "content" => [{ "type" => "text", "text" => string }] }
+
+TOOLS = [
+  {
+    "name" => "ask_user",
+    "description" => <<~TEXT,
+      Ask the person a question by showing them a page you wrote, and wait for
+      their answer. This is the preferred way to ask anything with more than one
+      part — a choice between options, a form, a confirmation, anything you would
+      otherwise make them type. They are not a programmer and are usually on a
+      phone: three big buttons beat a paragraph.
+
+      Write an HTML file into ~/public first, then pass its name here. Any <form>
+      in it posts back automatically — just use plain inputs with `name`
+      attributes and a submit button. A named submit button tells you which one
+      they pressed. A bare <button data-answer="..."> works too, with no form at
+      all. Returns what they filled in, as JSON.
+    TEXT
+    "inputSchema" => {
+      "type" => "object",
+      "properties" => {
+        "path" => { "type" => "string", "description" => "File name inside ~/public, e.g. \"choose-plan.html\"" },
+        "title" => { "type" => "string", "description" => "Short title for the pop-up's bar, in their language" },
+        "timeout_seconds" => { "type" => "integer", "description" => "How long to wait. Default 600." }
+      },
+      "required" => ["path"]
+    }
+  },
+  {
+    "name" => "show_page",
+    "description" => <<~TEXT,
+      Put a page you wrote in front of them right now, without waiting for an
+      answer — a preview, a chart, a summary, the welcome email you captured.
+      Same as ask_user but it returns immediately. Write the HTML into ~/public
+      first and pass its name.
+    TEXT
+    "inputSchema" => {
+      "type" => "object",
+      "properties" => {
+        "path" => { "type" => "string", "description" => "File name inside ~/public" },
+        "title" => { "type" => "string", "description" => "Short title for the pop-up's bar" }
+      },
+      "required" => ["path"]
+    }
+  },
+  {
+    "name" => "ask_result",
+    "description" => "Pick up the answer to an ask_user you already sent, if it timed out while they were away.",
+    "inputSchema" => {
+      "type" => "object",
+      "properties" => {
+        "id" => { "type" => "string" },
+        "timeout_seconds" => { "type" => "integer", "description" => "How long to wait this time. Default 600." }
+      },
+      "required" => ["id"]
+    }
+  },
+  {
+    "name" => "send_notification",
+    "description" => <<~TEXT,
+      Buzz their phone. Use it when something finished that they were waiting on
+      and they've walked away — a deploy that's live, a long job that's done. The
+      end of your turn already notifies them, so don't double up on that.
+    TEXT
+    "inputSchema" => {
+      "type" => "object",
+      "properties" => {
+        "title" => { "type" => "string" },
+        "body" => { "type" => "string", "description" => "One line, in their language" }
+      },
+      "required" => ["body"]
+    }
+  }
+].freeze
+
+def call_tool(name, args)
+  case name
+  when "ask_user"   then open_page(args, wait: true)
+  when "show_page"  then open_page(args, wait: false)
+  when "ask_result" then await(args["id"].to_s, args.fetch("timeout_seconds", 600).to_i)
+  when "send_notification"
+    response = post("/ask/notify", { title: args["title"], body: args["body"] })
+    response.is_a?(Net::HTTPSuccess) ? text("Sent.") : text("Couldn't send it (#{response.code}).")
+  else
+    text("No such tool: #{name}")
+  end
+rescue StandardError => e
+  # Never raise out of a tool call: claude should read what went wrong and carry
+  # on, not lose the tool for the rest of the session.
+  text("That didn't work: #{e.class} #{e.message}")
+end
+
+def handle(request)
+  case request["method"]
+  when "initialize"
+    { "protocolVersion" => PROTOCOL, "capabilities" => { "tools" => {} },
+      "serverInfo" => { "name" => "appsmoothly", "version" => "1.0.0" } }
+  when "tools/list"
+    { "tools" => TOOLS }
+  when "tools/call"
+    call_tool(request.dig("params", "name"), request.dig("params", "arguments") || {})
+  when "ping"
+    {}
+  end
+end
+
+$stdout.sync = true
+while (line = $stdin.gets)
+  line = line.strip
+  next if line.empty?
+
+  begin
+    request = JSON.parse(line)
+  rescue JSON::ParserError
+    next
+  end
+
+  result = handle(request)
+  # Notifications (no id) get no reply, and an unknown method we simply ignore.
+  next if request["id"].nil? || result.nil?
+
+  puts JSON.generate({ "jsonrpc" => "2.0", "id" => request["id"], "result" => result })
+end

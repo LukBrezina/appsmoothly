@@ -22,6 +22,16 @@ Rails.application.routes.draw do
   get  "push/key"          => "push#key",           as: :push_key
   post "push/subscribe"    => "push#subscribe",     as: :push_subscribe
 
+  # claude's pop-up UI. It writes a page, calls the ask tool (bin/mcp-ui), and
+  # the box shows it over the terminal; what the user fills in comes back as that
+  # tool call's return value. create/result are the tool's loopback API,
+  # show/answer are what the browser touches.
+  post "ask"            => "ask#create", as: :ask_open
+  post "ask/notify"     => "ask#notify", as: :ask_notify
+  get  "ask/:id/result" => "ask#result", as: :ask_result
+  get  "ask/:id"        => "ask#show",   as: :ask
+  post "ask/:id/answer" => "ask#answer", as: :ask_answer
+
   # Claude's own UI. Anything it writes (or symlinks) into the publish dir is a
   # page the user can open — an inbox, a list of versions, a chart — so it can
   # build whatever screen the moment needs instead of us shipping one.

@@ -57,6 +57,12 @@ module Push
     broadcast(title: "Claude", body: "Claude is done — your turn.")
   end
 
+  # A pop-up is waiting for them. Not throttled with the turn bell: this one is
+  # a direct question, and it is worth interrupting a backgrounded phone for.
+  def notify_asked!(title = nil)
+    broadcast(title: "Claude needs you", body: title.presence || "There's something to look at.")
+  end
+
   def broadcast(title:, body:)
     subs = load_subs
     return if subs.empty?
