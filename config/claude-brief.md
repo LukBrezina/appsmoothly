@@ -64,6 +64,22 @@ server on port `$PORT`, bound to `0.0.0.0`, and the TRY IT button at the top of
 their terminal shows it. Keep it in a background tmux window
 (`tmux new-window -d -t claude ...`), never in the foreground of this session.
 
+Requests arrive through Caddy under `$APPSMOOTHLY_DOMAIN`, which a Rails app in
+development refuses by default — the owner taps TRY IT and gets a 403 "Blocked
+hosts" page instead of their app. Allow the domain and every subdomain, in
+`config/environments/development.rb`:
+
+```ruby
+if (domain = ENV["APPSMOOTHLY_DOMAIN"]).present?
+  config.hosts << /\A(.+\.)?#{Regexp.escape(domain)}\z/i
+end
+```
+
+A regexp, not `config.hosts << ".#{domain}"`: the shorthand spans a single
+label, so it lets `terminal.<domain>` through while still blocking the preview
+links, which sit two deep at `*.preview.<domain>`. Production needs nothing —
+`config.hosts` is empty there, so the check is off.
+
 **Parallel work.** Use `git worktree`, extra tmux sessions and windows however
 you like. They only ever see this one session, so don't mention them.
 
@@ -106,6 +122,40 @@ git HEAD, so commit before deploying or the change won't ship. Run deploys in a
 background tmux window and report progress in plain language — don't paste the
 log at them.
 
+## Rewinding
+
+Three things can be put back, and they are separate decisions. Ask which they
+want — most "undo this" requests are code only, and restoring data as well
+throws away everything that happened since.
+
+**Code** — `kamal app versions` lists what has been live; `kamal rollback <sha>`
+puts one back. Nothing about their data changes.
+
+**The database** — litestream restores to any second inside the retention
+window. The app must be stopped first, or it writes over the restore:
+
+```
+kamal app stop
+litestream restore -config config/litestream.yml \
+  -timestamp 2026-07-27T14:30:00Z -o /tmp/restored.sqlite3 <db path>
+```
+
+Then put the file in place of `storage/production.sqlite3` inside the volume and
+`kamal app boot`. Restore *only* the main database. The jobs database looks
+restorable and is a trap: rewinding it resurrects jobs that already ran, and
+they run again — welcome emails, charges, the lot.
+
+**Files** — attachments deleted since that moment are still in the bucket,
+recoverable for the window, but only through Google's JSON API. The S3-style
+keys litestream and Active Storage use cannot see deleted objects at all; that
+is what `APPSMOOTHLY_GCS_RESTORE_KEYFILE` is for. It can list, read and undelete,
+and nothing else — it cannot delete or overwrite, so reaching for it is never
+the dangerous move.
+
+Take a copy of the current database before restoring over it. A rewind they
+regret is otherwise unrewindable, and "I meant Tuesday, not last Tuesday" is a
+thing people say.
+
 ## What the box hands you
 
 | variable | what it's for |
@@ -114,7 +164,8 @@ log at them.
 | `APPSMOOTHLY_APP_NAME` | what the owner calls it — use this when you talk to them |
 | `APPSMOOTHLY_LANGUAGE` | the language to talk to them in |
 | `APPSMOOTHLY_DOMAIN` | the address the live app answers on |
-| `APPSMOOTHLY_S3_*` | bucket that refuses deletions — attachments and backups |
+| `APPSMOOTHLY_S3_*` | attachments and backups — every delete stays undoable for 7 days |
+| `APPSMOOTHLY_GCS_RESTORE_KEYFILE` | the only credential that can undo one |
 | `APPSMOOTHLY_SMTP_*` | a real mail relay, for the live app only |
 | `PORT` | the dev server port behind the TRY IT button |
 
@@ -122,6 +173,14 @@ If `APPSMOOTHLY_S3_BUCKET` is set, wire it up the first time you deploy without
 being asked: Active Storage in production, plus a litestream accessory
 streaming the SQLite files to that bucket. That is their backup and their
 rewind button — just tell them it's on.
+
+Set litestream's `retention` to at least the bucket's window (7 days). It
+defaults to 24 hours, which quietly gives them one day of rewind against seven
+days of backups — and nobody discovers that until they need the sixth day.
+
+Deletes in that bucket are real but reversible: the object goes, and Google
+keeps it recoverable for the window. Nothing on the box can make a deletion
+stick, and nothing can shorten the window either.
 
 ## Email
 

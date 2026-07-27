@@ -25,6 +25,19 @@ module Agent
     "--append-system-prompt-file #{Rails.root.join('config/claude-brief.md').to_s.shellescape}"
   ].join(" ").freeze
 
+  # The tmux server inherits this Rails process's environment, and bundler puts
+  # THIS app's Gemfile in it. Claude works on the *customer's* app, so every
+  # `bundle`, `bin/rails` and `bin/dev` it runs would resolve against the
+  # factory's gems and die with a Bundler::GemNotFound naming gems that are
+  # installed — an error that reads like a broken app, not a wrong environment.
+  # Stripped from claude's own process, so everything it spawns is clean too.
+  BUNDLER_ENV = %w[
+    RUBYOPT RUBYLIB GEM_PATH RBENV_DIR
+    BUNDLE_GEMFILE BUNDLE_LOCKFILE BUNDLE_BIN_PATH BUNDLER_SETUP BUNDLER_VERSION
+  ].freeze
+
+  CLEAN_ENV = "env #{BUNDLER_ENV.map { |name| "-u #{name}" }.join(' ')}".freeze
+
   module_function
 
   def alive? = !!system("tmux", "has-session", "-t", "=#{NAME}", out: File::NULL, err: File::NULL)
@@ -87,8 +100,8 @@ module Agent
   end
 
   def command(prompt = nil)
-    fallback = ["claude", FLAGS, prompt.presence&.shellescape].compact.join(" ")
-    "claude #{FLAGS} --continue || #{fallback}"
+    fallback = [CLEAN_ENV, "claude", FLAGS, prompt.presence&.shellescape].compact.join(" ")
+    "#{CLEAN_ENV} claude #{FLAGS} --continue || #{fallback}"
   end
 
   # claude's process title is its version number ("2.1.200"), never "claude" —
