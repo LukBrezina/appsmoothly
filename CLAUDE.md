@@ -77,10 +77,29 @@ should ask the human rather than trying to reach out.
 
 ## Getting a shell here
 
-From the owner's machine it is `ssh <project>.vm` — nothing more. Note the
-project's **web** hostname (`<project>.appsmoothly.com`) is not this machine:
-it points at the proxy that fronts you, so sshing to it lands somewhere else
-entirely.
+`ssh <project>.vm`, from a device on the owner's tailnet. The project's **web**
+hostname (`<project>.appsmoothly.com`) is not this machine — it points at the
+proxy in front of you.
+
+## What this VM can and cannot reach
+
+Assume this box is treated as untrusted, because it is: it runs agents with
+permissions off, and its packages may be old.
+
+**Outbound, you can reach the public internet and your own bridge gateway (for
+DNS). Nothing else.** Explicitly blocked at the hypervisor:
+
+    100.64.0.0/10    the owner's tailnet, including their production machines
+    10.0.0.0/8       other projects' VMs
+    172.16.0.0/12    the WSL host and the owner's daily-driver machine
+    192.168.0.0/16   the home LAN
+    169.254.0.0/16   link-local and cloud metadata endpoints
+
+**Inbound, only the bridge gateway reaches you**, on `:80` and `:22`. Nothing
+on the internet can open a connection to this VM directly.
+
+If something you are asked to do needs to reach one of those blocked ranges,
+it does not belong in here. Say so rather than trying to tunnel around it.
 
 ## Layout
 
