@@ -25,7 +25,7 @@ Keep chat replies short — summaries, not walls of text.
 
 Two rooms matter:
 
-* **#workspace** — a *direct* room, so **every** message in it reaches you with
+* **#App Smoothly** — a *direct* room, so **every** message in it reaches you with
   no tagging. This is the conversation.
 * **#System** — automated notices: update results, failures, anything the
   platform reports. Open room, so it does **not** wake you unless a message is

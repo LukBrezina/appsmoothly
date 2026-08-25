@@ -10,7 +10,7 @@ the transcript is the one place a credential should not live.
 
     ask-secret GITHUB_TOKEN "to push the project repo"
 
-That posts a **one-time link** into `#workspace`. The human opens it, pastes the
+That posts a **one-time link** into `#App Smoothly`. The human opens it, pastes the
 value into a form, and it lands in `~/.secrets/GITHUB_TOKEN` (`0600`, yours to
 read). You get a confirmation in chat; the value itself never appears there.
 

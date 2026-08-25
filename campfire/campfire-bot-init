@@ -43,6 +43,33 @@ chown lukas:lukas /home/lukas/.config/claude-bot/config.env
 chmod 600 /home/lukas/.config/claude-bot/config.env
 
 systemctl enable --now claude-bot
+
+# Rooms. #workspace is a DIRECT room on purpose: Campfire delivers every
+# message in a direct room to the bots in it, so Claude sees everything there
+# without being tagged. #System is an open room, which only reaches a bot when
+# a message is explicitly delivered to it -- so automated notices land there
+# without waking Claude.
+docker exec campfire bin/rails runner '
+  user = User.where.not(role: :bot).order(:id).first
+  bot  = User.active_bots.find_by(name: "Claude")
+  if user && bot
+    Current.user = user
+    ws = Rooms::Direct.find_or_create_for([ user, bot ])
+    ws.update!(name: "App Smoothly") unless ws.name == "App Smoothly"
+    # Campfire lands you on Current.user.rooms.original -- the oldest room --
+    # so make this one the oldest.
+    oldest = Room.order(:created_at).first
+    ws.update_column(:created_at, oldest.created_at - 60) if oldest && oldest.id != ws.id
+    Room.find_by(name: "System") ||
+      Rooms::Open.create_for({ name: "System" }, users: [ user, bot ])
+    # Campfire creates "All Talk" at first-run. It is an OPEN room, so the bot
+    # only answers there when tagged -- which reads as the bot being broken.
+    # Remove it while it is still empty so #workspace is the obvious place.
+    at = Room.find_by(name: "All Talk")
+    at.destroy if at && at.messages.none?
+  end
+' >/dev/null 2>&1 && echo "  rooms: workspace + System"
+
 touch "$STATE/bot-done"
 systemctl disable --now campfire-bot-init.timer 2>/dev/null || true
 echo "Claude bot created and bridge started"
