@@ -45,6 +45,9 @@ If the bot never shows up:
 | `/etc/campfire/env` | `SECRET_KEY_BASE`, VAPID keys, `0600` |
 | `campfire-bot-init.timer` | waits for first-run, then creates the bot |
 
+Look the bot up by role (`User.active_bots`), never by name — its name is the
+label of the direct room in the UI, so the owner may change it.
+
 Every VM generates its **own** `SECRET_KEY_BASE`, VAPID keypair and bridge
 secret on first boot. Nothing is shared between projects, and no credentials are
 invented for you — the admin login is whatever you set at first-run.

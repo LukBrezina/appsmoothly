@@ -16,8 +16,10 @@ GW=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1
 GW="${GW:-172.17.0.1}"
 
 BOT_KEY=$(docker exec campfire bin/rails runner "
-  bot = User.active_bots.find_by(name: 'Claude') ||
-        User.create_bot!(name: 'Claude', email_address: 'claude@bot.local',
+  # The bot's name is the label Campfire shows for the direct room -- room.name
+  # is ignored for direct rooms -- so this is effectively the chat's title.
+  bot = User.active_bots.order(:id).first ||
+        User.create_bot!(name: 'App Smoothly', email_address: 'claude@bot.local',
                          password: SecureRandom.hex(16),
                          webhook_url: 'http://$GW:4488/hook/$BRIDGE_SECRET')
   puts bot.bot_key
@@ -51,7 +53,7 @@ systemctl enable --now claude-bot
 # without waking Claude.
 docker exec campfire bin/rails runner '
   user = User.where.not(role: :bot).order(:id).first
-  bot  = User.active_bots.find_by(name: "Claude")
+  bot  = User.active_bots.order(:id).first
   if user && bot
     Current.user = user
     ws = Rooms::Direct.find_or_create_for([ user, bot ])

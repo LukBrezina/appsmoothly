@@ -25,8 +25,10 @@ Keep chat replies short — summaries, not walls of text.
 
 Two rooms matter:
 
-* **#App Smoothly** — a *direct* room, so **every** message in it reaches you with
-  no tagging. This is the conversation.
+* **App Smoothly** — a *direct* room, so **every** message in it reaches you
+  with no tagging. This is the conversation. It appears under **directs** in the
+  sidebar, not the room list, and is labelled with the bot's name: Campfire
+  ignores `room.name` for direct rooms and shows the other participant instead.
 * **#System** — automated notices: update results, failures, anything the
   platform reports. Open room, so it does **not** wake you unless a message is
   deliberately delivered. Post here with `notify "..."`, or `notify --ask "..."`
