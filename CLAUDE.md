@@ -67,6 +67,10 @@ the `deploy-previews` skill.
 
 ## Credentials
 
+Need a token you do not have? **Do not ask for it in chat.** Run
+`ask-secret NAME "why"` and the human gets a one-time paste form; see the
+`secrets` skill.
+
 `/etc/claude/oauth-token` is root-owned `0600` and holds the subscription token
 that authenticates you. Do not print it, copy it into a shell profile, commit
 it, or pass it to anything.

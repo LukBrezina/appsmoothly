@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import threading
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -229,8 +230,119 @@ def handle_mention(payload):
         log(f"room {room['id']}: reply post FAILED: {e}")
 
 
+
+# --- secret requests -------------------------------------------------------
+# Claude asks for a value it must not see typed into chat; the human gets a
+# one-time link and pastes it into a form. The value lands in a file the agent
+# can read -- the point is keeping it out of the chat transcript, not hiding it
+# from the agent.
+#
+# Served by this same process on purpose: it is already an HTTP server in the
+# VM, so nothing new has to run.
+
+SECRETS_DIR = os.path.expanduser("~/.secrets")
+REQUESTS_FILE = os.path.expanduser("~/.local/state/claude-bot/secret-requests.json")
+requests_lock = threading.Lock()
+
+
+def _load_requests():
+    try:
+        with open(REQUESTS_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_requests(data):
+    os.makedirs(os.path.dirname(REQUESTS_FILE), exist_ok=True)
+    tmp = REQUESTS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, REQUESTS_FILE)
+
+
+def store_secret(name, value):
+    os.makedirs(SECRETS_DIR, mode=0o700, exist_ok=True)
+    path = os.path.join(SECRETS_DIR, name)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(value)
+    return path
+
+
+_PAGE = """<!doctype html><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<style>
+ body{{font:16px/1.5 system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem;
+      background:#fbfbfa;color:#1a1a19}}
+ h1{{font-size:1.25rem;margin:0 0 .25rem}}
+ p{{color:#5a5a57;margin:.25rem 0 1.25rem}}
+ code{{background:#eee;padding:.1rem .3rem;border-radius:3px}}
+ input,button{{font:inherit;width:100%;box-sizing:border-box;padding:.7rem;
+      border:1px solid #ccc;border-radius:6px}}
+ button{{margin-top:.75rem;background:#1a1a19;color:#fff;border:0;cursor:pointer}}
+ .ok{{color:#0a7a35}} .bad{{color:#a11}}
+</style>
+<h1>{title}</h1><p>{sub}</p>{body}"""
+
+
+def _page(title, sub, body=""):
+    return _PAGE.format(title=html.escape(title), sub=sub, body=body).encode()
+
+
+# --- end secret requests ---------------------------------------------------
+
 class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        m = re.fullmatch(r"/secret/([0-9a-f]{32})", self.path)
+        if not m:
+            self.send_response(404); self.end_headers(); return
+        with requests_lock:
+            req = _load_requests().get(m.group(1))
+        if not req:
+            self._html(410, _page("Link already used",
+                                  "Ask Claude for a new one if you still need to send this."))
+            return
+        name = html.escape(req["name"])
+        reason = html.escape(req.get("reason") or "")
+        body = (f'<form method=post autocomplete=off>'
+                f'<input name=value type=password placeholder="Paste value for {name}" '
+                f'autofocus required>'
+                f'<button>Save</button></form>')
+        self._html(200, _page(f"Secret: {req['name']}",
+                              reason or "Paste the value below. It is stored on this VM only "
+                                        "and never appears in chat.", body))
+
     def do_POST(self):
+        m = re.fullmatch(r"/secret/([0-9a-f]{32})", self.path)
+        if m:
+            token = m.group(1)
+            with requests_lock:
+                reqs = _load_requests()
+                req = reqs.pop(token, None)
+                if req:
+                    _save_requests(reqs)
+            if not req:
+                self._html(410, _page("Link already used", "Nothing was saved.")); return
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length).decode("utf-8", "replace")
+            value = urllib.parse.parse_qs(raw).get("value", [""])[0]
+            if not value:
+                self._html(400, _page("Empty", "Nothing was saved.")); return
+            path = store_secret(req["name"], value)
+            log(f"secret '{req['name']}' stored ({len(value)} chars)")
+            try:
+                post_reply(req["room_path"],
+                           f"Secret <code>{html.escape(req['name'])}</code> received and stored. "
+                           f"It is not in this conversation.")
+            except Exception as e:
+                log(f"could not confirm in chat: {e}")
+            self._html(200, _page("Saved", f"Stored as <code>{html.escape(path)}</code>. "
+                                           "You can close this tab."))
+            return
+
         if self.path != f"/hook/{SECRET}":
             self.send_response(404)
             self.end_headers()
@@ -248,6 +360,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.end_headers()
         threading.Thread(target=handle_mention, args=(payload,), daemon=True).start()
+
+    def _html(self, code, body):
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, *args):
         pass
