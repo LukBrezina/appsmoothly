@@ -71,14 +71,36 @@ Useful models: `User` (`role: :bot` for bots, `bot_key` for the API key),
 
 ## Changing Campfire itself
 
-The source can be checked out under `projects/once-campfire`. It is a Rails app
-built into a Docker image — after editing you must rebuild the image and
-restart the service, not just reload:
+The source is checked out at `projects/once-campfire`, tracking
+`basecamp/once-campfire` with no local patches. **The running container is built
+from exactly this checkout**, so what you read there is what is running.
+
+Edit, rebuild, restart:
 
     cd /home/appsmoothly/projects/once-campfire
-    sudo docker build -t campfire:local .
+    # ... make your changes ...
+    sudo DOCKER_BUILDKIT=1 docker build -t campfire:local .
     sudo systemctl restart campfire
 
-The container keeps its data in the `campfire` Docker volume, so rebuilding the
-image does not lose messages. **Do not delete that volume** — it holds the
-database and every uploaded file.
+`DOCKER_BUILDKIT=1` is **required** — the Dockerfile uses `COPY --chmod`, which
+the legacy builder rejects outright. Without it the build dies around step 25.
+
+The container keeps its data in the `campfire` Docker volume, so rebuilding does
+not lose messages. **Do not delete that volume** — it holds the database and
+every uploaded file.
+
+### Staying current with upstream
+
+    sudo /usr/local/sbin/campfire-update            # fetch, rebuild, restart
+    sudo /usr/local/sbin/campfire-update --force    # rebuild even if unchanged
+
+This runs on a daily timer. It is fast-forward only, so **local commits in that
+checkout will block it** — the same tradeoff as the workspace repo. If you have
+changes worth keeping, push them to your own fork and repoint `origin`.
+
+### Where to put a change
+
+Nothing is applied on top of upstream, so a local edit here diverges silently.
+Prefer changing Campfire through its own configuration or a Rails initializer
+where possible; reserve source edits for things that genuinely cannot be done
+otherwise, and expect to maintain them.
