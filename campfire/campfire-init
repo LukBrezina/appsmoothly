@@ -27,10 +27,10 @@ chmod 600 /etc/campfire/env
 echo "==> starting campfire"
 systemctl start campfire
 for i in $(seq 1 60); do
-    curl -sf -o /dev/null http://127.0.0.1:80/up 2>/dev/null && break
+    curl -sf -o /dev/null http://127.0.0.1:8080/up 2>/dev/null && break
     sleep 3
 done
-curl -sf -o /dev/null http://127.0.0.1:80/up || { echo "campfire did not become healthy" >&2; exit 1; }
+curl -sf -o /dev/null http://127.0.0.1:8080/up || { echo "campfire did not become healthy" >&2; exit 1; }
 
 echo "==> creating admin account and Claude bot"
 BOT_KEY=$(docker exec campfire bin/rails runner "
@@ -55,7 +55,7 @@ cat > /home/lukas/.config/claude-bot/config.env <<EOF
 BRIDGE_SECRET=$BRIDGE_SECRET
 LISTEN_ADDR=$GW
 LISTEN_PORT=4488
-CAMPFIRE_BASE=http://127.0.0.1:80
+CAMPFIRE_BASE=http://127.0.0.1:8080
 CLAUDE_BIN=/usr/local/bin/claude
 WORKDIR=/home/lukas/work
 SESSIONS_FILE=/home/lukas/.local/state/claude-bot/sessions.json

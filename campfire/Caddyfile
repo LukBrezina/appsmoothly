@@ -1,0 +1,22 @@
+# In-VM router. Everything from outside arrives here on :80; this decides where
+# it goes by hostname, so adding a service or a preview needs no change outside
+# the VM.
+#
+# Hostname-agnostic on purpose: the VM does not know its own project name, and
+# matching on the leading label means this file is identical in every VM.
+:80 {
+	# app.<project>...  -> the project's application
+	@app header_regexp Host ^app\.
+	handle @app {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Anything you add yourself. Drop a file in /etc/caddy/routes/ with its own
+	# matcher + handle block; see the deploy-previews skill.
+	import /etc/caddy/routes/*.caddy
+
+	# Everything else -> Campfire, including the project's main hostname.
+	handle {
+		reverse_proxy 127.0.0.1:8080
+	}
+}

@@ -7,30 +7,26 @@ description: Run an app or service inside a project VM so it is reachable from o
 
 ## Which port
 
-| Port | Reachable from outside | Use |
+| Port | Who | Notes |
 |---|---|---|
-| `80` | yes | taken by Campfire — leave it alone |
-| `3000` | yes | **your app** (`app.<project>.appsmoothly.com`) |
-| `22` | yes | ssh |
-| anything else | **no** | internal only |
+| `80` | **Caddy** | the only HTTP port that crosses the VM boundary |
+| `8080` | Campfire | loopback only |
+| `3000` | **your app** | loopback only; Caddy sends `app.*` here |
+| `22` | ssh | |
+| anything else | free | reachable through Caddy, not directly |
 
-A firewall outside this VM drops everything else, so a service on `:4000` is
-invisible no matter how correctly it runs. Either use `3000`, or put Caddy in
-front (below).
+Caddy owns `:80` and routes by hostname. Everything behind it stays on
+loopback, so you cannot accidentally expose a service by binding it.
 
-## Bind to 0.0.0.0
+## Bind to 127.0.0.1
 
-The proxy that serves your app is **outside** this VM. A service bound to
-`127.0.0.1` is unreachable, and this is the single most common reason a service
-"works" locally and 502s from the browser.
+    rails s -b 127.0.0.1 -p 3000
+    node server.js --host 127.0.0.1 --port 3000
+    python -m http.server 3000 --bind 127.0.0.1
 
-    rails s -b 0.0.0.0 -p 3000
-    node server.js --host 0.0.0.0 --port 3000
-    python -m http.server 3000 --bind 0.0.0.0
+Check:
 
-Check what you actually bound:
-
-    ss -tlnp | grep 3000        # want 0.0.0.0:3000, not 127.0.0.1:3000
+    ss -tlnp | grep 3000        # 127.0.0.1:3000 is correct here
 
 ## Make it survive a reboot
 
@@ -82,6 +78,12 @@ only distinguishes hostnames that already route here; see the
 A 502 in the browser means the proxy reached this VM but nothing answered.
 
     systemctl status myapp --no-pager     # is it running?
-    ss -tlnp | grep -E ':(80|3000) '      # is it bound to 0.0.0.0?
-    curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/
+    ss -tlnp | grep 3000                  # is it bound at all?
+    curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/     # direct
+    curl -sS -o /dev/null -H 'Host: app.x.appsmoothly.com' \
+         -w '%{http_code}\n' http://127.0.0.1:80/                        # via Caddy
     journalctl -u myapp -n 50 --no-pager
+    journalctl -u caddy -n 30 --no-pager
+
+If direct works but via-Caddy 502s, the route is wrong. If both 502, the app is
+not up.

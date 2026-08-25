@@ -7,12 +7,16 @@ description: How a request reaches this VM — the hostname scheme, which subdom
 
 ## The scheme
 
-    https://<project>.appsmoothly.com             -> port 80    (Campfire)
-    https://app.<project>.appsmoothly.com         -> port 3000  (your app)
-    https://<anything>.<project>.appsmoothly.com  -> port 80    (wildcard -> Campfire)
+Everything for this project — the main name and the whole wildcard — arrives at
+**Caddy inside this VM, on port 80**. Caddy then decides:
 
-`app.` is matched more specifically than the wildcard, so it wins. Any other
-subdomain currently lands on Campfire.
+    <project>.appsmoothly.com             -> 127.0.0.1:8080   Campfire
+    app.<project>.appsmoothly.com         -> 127.0.0.1:3000   your app
+    <anything>.<project>.appsmoothly.com  -> your route files, else Campfire
+
+The consequence worth internalising: **you can create new hostnames yourself.**
+The wildcard already resolves and is already covered by the certificate, so a
+route file in `/etc/caddy/routes/` is all it takes. See `deploy-previews`.
 
 ## The path a request takes
 
@@ -35,9 +39,11 @@ over the private network, and the URL carries an explicit `:8443`.
 * **You only ever see plain HTTP** arriving on `80` and `3000`.
 * **The client IP you see is the proxy**, not the visitor. Use
   `X-Forwarded-For` if you need the real one.
-* **Adding a new hostname needs a change outside this VM** — a DNS record and a
-  proxy route. You cannot do it from in here. Ask the human. What you *can* do
-  is route hostnames that already point here, with a local Caddy.
+* **Subdomains of this project are yours.** `*.<project>.appsmoothly.com`
+  already points here and is already covered by the certificate — add a Caddy
+  route file and it works.
+* **A hostname outside that pattern** (a different apex, or a different
+  project's name) needs DNS and proxy changes outside this VM. Ask the human.
 
 ## Exposure modes
 
@@ -53,7 +59,14 @@ anything sensitive on a page.
 
 ## Checking
 
-    curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:80/     # campfire
+    # through the router, as the outside world arrives
+    curl -sS -o /dev/null -H 'Host: x.appsmoothly.com' \
+         -w '%{http_code}\n' http://127.0.0.1:80/          # -> Campfire, expect 302
+    curl -sS -o /dev/null -H 'Host: app.x.appsmoothly.com' \
+         -w '%{http_code}\n' http://127.0.0.1:80/          # -> your app
+
+    # the backends directly
+    curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/   # campfire
     curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/   # your app
 
 If those work but the public URL does not, the problem is outside this VM and

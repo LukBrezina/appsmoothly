@@ -1,0 +1,14 @@
+[Unit]
+Description=Clone the workspace repo and Campfire source into this VM
+After=campfire-init.service network-online.target
+Requires=network-online.target
+ConditionPathExists=!/var/lib/campfire-init/bootstrapped
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/vm-bootstrap
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

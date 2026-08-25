@@ -1,0 +1,28 @@
+#!/bin/bash
+# Pull the latest Campfire from upstream, rebuild the image, restart the service.
+# The Docker volume holds the database and uploads, so this keeps your messages.
+set -euo pipefail
+SRC=/home/lukas/work/appsmoothly/projects/once-campfire
+[ -d "$SRC/.git" ] || { echo "no checkout at $SRC" >&2; exit 1; }
+
+echo "==> fetching upstream"
+sudo -u lukas git -C "$SRC" fetch --quiet origin
+BEFORE=$(git -C "$SRC" rev-parse HEAD)
+sudo -u lukas git -C "$SRC" merge --ff-only origin/main
+AFTER=$(git -C "$SRC" rev-parse HEAD)
+
+if [ "$BEFORE" = "$AFTER" ]; then
+    echo "==> already up to date ($(git -C "$SRC" log -1 --format=%h))"
+    [ "${1:-}" = "--force" ] || exit 0
+fi
+
+echo "==> building image"
+docker build -q -t campfire:local "$SRC"
+echo "==> restarting"
+systemctl restart campfire
+for i in $(seq 1 40); do
+    curl -sf -o /dev/null http://127.0.0.1:8080/up 2>/dev/null && { echo "==> healthy"; exit 0; }
+    sleep 3
+done
+echo "==> did NOT come back healthy; check: journalctl -u campfire -n 50" >&2
+exit 1

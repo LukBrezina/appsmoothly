@@ -13,10 +13,10 @@ services — that is what this box is for.
 
 | | |
 |---|---|
-| **Campfire** | chat, Docker container, on port `80`. The project's main URL. |
+| **Campfire** | chat, Docker container, internal on `127.0.0.1:8080` |
 | **Claude bot** | `claude-bot.service` — a bridge from Campfire to `claude -p` |
 | **Docker** | installed and running |
-| **Caddy** | installed but **not** enabled; use it if you need in-VM routing |
+| **Caddy** | **the router**. Owns `:80`; everything from outside arrives here |
 | Your user | `lukas`, passwordless sudo |
 
 The human talks to you through Campfire, often from a phone. Messages you
@@ -42,12 +42,20 @@ You cannot change which mode you are in from inside the VM. Ask the human.
 
 ## Ports
 
-Only `80`, `3000` and `22` are reachable from outside the VM; a firewall rule
-outside drops the rest. Bind services to `0.0.0.0`, not `127.0.0.1`, or the
-proxy in front cannot reach them.
+Only **`80` and `22`** cross the VM boundary. Port `80` is Caddy, which routes
+by hostname to whatever is inside:
 
-If you need more than one HTTP service exposed, run Caddy in here as a local
-router in front of them rather than asking for more ports.
+    :80  Caddy  ->  app.*      -> 127.0.0.1:3000   your app
+                ->  /etc/caddy/routes/*.caddy      your own routes
+                ->  everything else -> 127.0.0.1:8080   Campfire
+
+So your services bind **`127.0.0.1`**, not `0.0.0.0` — only Caddy needs to be
+externally reachable, and keeping backends on loopback means nothing is exposed
+by accident.
+
+Adding a hostname no longer needs anything outside the VM: the whole
+`*.<project>` wildcard already points here, so a new route file is enough. See
+the `deploy-previews` skill.
 
 ## Credentials
 

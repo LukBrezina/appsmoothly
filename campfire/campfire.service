@@ -8,7 +8,7 @@ Type=simple
 EnvironmentFile=/etc/campfire/env
 ExecStartPre=-/usr/bin/docker rm -f campfire
 ExecStart=/usr/bin/docker run --rm --name campfire \
-    -p 0.0.0.0:80:80 \
+    -p 127.0.0.1:8080:80 \
     -v campfire:/rails/storage \
     -e SECRET_KEY_BASE \
     -e VAPID_PRIVATE_KEY \

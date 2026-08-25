@@ -1,0 +1,27 @@
+#!/bin/bash
+# Clone the workspace repo and the Campfire source into the VM. Runs once,
+# after campfire-init. Idempotent.
+set -euo pipefail
+STATE=/var/lib/campfire-init
+[ -f "$STATE/bootstrapped" ] && exit 0
+
+WORK=/home/lukas/work
+install -d -o lukas -g lukas "$WORK"
+
+clone() {  # clone <url> <dest>
+    local url="$1" dest="$2"
+    if [ -d "$dest/.git" ]; then
+        sudo -u lukas git -C "$dest" pull --ff-only 2>&1 | tail -1 || true
+    else
+        sudo -u lukas git clone -q "$url" "$dest" 2>&1 | tail -1 || {
+            echo "  WARN: could not clone $url" >&2; return 0; }
+    fi
+}
+
+clone https://github.com/LukBrezina/appsmoothly.git "$WORK/appsmoothly"
+# Tracked clean against upstream -- no local customisations to preserve.
+clone https://github.com/basecamp/once-campfire.git "$WORK/appsmoothly/projects/once-campfire"
+
+chown -R lukas:lukas "$WORK"
+touch "$STATE/bootstrapped"
+echo "bootstrapped $WORK/appsmoothly"
