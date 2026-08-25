@@ -16,6 +16,7 @@ Config comes from environment variables (see config.env):
   LISTEN_PORT
   CAMPFIRE_BASE   where to POST replies (kamal-proxy on localhost)
   CLAUDE_BIN      absolute path to the claude CLI
+  CLAUDE_MODEL    model for the chat session (default sonnet)
   WORKDIR         directory claude runs in
   SESSIONS_FILE   JSON file mapping room id -> claude session id
 """
@@ -36,6 +37,7 @@ LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "4488"))
 CAMPFIRE_BASE = os.environ.get("CAMPFIRE_BASE", "http://127.0.0.1:8080").rstrip("/")
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 WORKDIR = os.environ.get("WORKDIR", "/home/appsmoothly")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet")
 SESSIONS_FILE = os.environ.get(
     "SESSIONS_FILE", os.path.expanduser("~/.local/state/claude-bot/sessions.json")
 )
@@ -120,6 +122,10 @@ class Session:
     def start(self):
         cmd = [
             CLAUDE_BIN, "-p", "--verbose",
+            # Chat is mostly questions, so the conversation runs on a fast
+            # model. Heavy work is delegated to a subagent pinned to a stronger
+            # one (see .claude/agents/), rather than upgrading every message.
+            "--model", CLAUDE_MODEL,
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             # Subagent output reaches the room too, so dispatching work is

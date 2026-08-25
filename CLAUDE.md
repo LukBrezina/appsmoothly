@@ -113,6 +113,19 @@ on the internet can open a connection to this VM directly.
 If something you are asked to do needs to reach one of those blocked ranges,
 it does not belong in here. Say so rather than trying to tunnel around it.
 
+## Models
+
+Chat runs on **Sonnet** — fast, and most messages are questions. Heavier work is
+delegated to a subagent with a stronger model rather than upgrading the whole
+conversation:
+
+    .claude/agents/implementer.md   opus    writes and changes code
+    .claude/agents/researcher.md    sonnet  reads across files to answer
+
+Use them. A refactor or a bug fix should go to `implementer`, not be typed out
+in the chat session. Their output is forwarded into the room as it happens, so
+delegating does not hide progress.
+
 ## Layout
 
 `/home/appsmoothly` **is** this repo, and it is your working directory.
@@ -120,9 +133,22 @@ it does not belong in here. Say so rather than trying to tunnel around it.
     /home/appsmoothly/
       CLAUDE.md            this file
       .claude/skills/      how to do specific things
+      .claude/agents/      subagents, each pinned to a model
       campfire/            Campfire + bot runtime
       projects/            project sources (gitignored, per-VM)
         once-campfire/     Campfire's own source, tracking upstream
+
+### Per-project instructions
+
+A project can carry its own `CLAUDE.md` and `.claude/skills/`, and they are
+picked up without starting a session there — in subagents too:
+
+    projects/myapp/
+      CLAUDE.md                        conventions: package manager, ports
+      .claude/skills/deploy/SKILL.md   how to ship it
+
+Project-specific knowledge belongs there, not in this file. This one is shared
+by every project on every VM.
 
 ## This repo updates itself
 
