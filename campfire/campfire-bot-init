@@ -50,12 +50,22 @@ chmod 600 /home/lukas/.config/claude-bot/config.env
 if [ -f /opt/claude-bot/avatar.png ]; then
     docker cp /opt/claude-bot/avatar.png campfire:/tmp/avatar.png 2>/dev/null &&
     docker exec campfire bin/rails runner '
+      # The bot carries the identity of the direct room; the account carries the
+      # identity of the whole Campfire install (title, favicon, login page).
       bot = User.active_bots.order(:id).first
       if bot && !bot.avatar.attached?
         bot.avatar.attach(io: File.open("/tmp/avatar.png"),
-                          filename: "app-smoothly.png", content_type: "image/png")
+                          filename: "appsmoothly.png", content_type: "image/png")
       end
-    ' >/dev/null 2>&1 && echo "  avatar set"
+      acct = Account.first
+      if acct
+        acct.update!(name: "AppSmoothly") if acct.name.blank? || acct.name == "Campfire"
+        unless acct.logo.attached?
+          acct.logo.attach(io: File.open("/tmp/avatar.png"),
+                           filename: "appsmoothly.png", content_type: "image/png")
+        end
+      end
+    ' >/dev/null 2>&1 && echo "  avatar + account branding set"
 fi
 
 systemctl enable --now claude-bot
