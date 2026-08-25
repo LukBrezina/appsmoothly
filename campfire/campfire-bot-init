@@ -44,6 +44,20 @@ EOF
 chown lukas:lukas /home/lukas/.config/claude-bot/config.env
 chmod 600 /home/lukas/.config/claude-bot/config.env
 
+# Give the bot its avatar. ActiveStorage will not make a variant from an SVG
+# (not a "variable" content type) and this build of vips has no SVG loader, so
+# this is a PNG.
+if [ -f /opt/claude-bot/avatar.png ]; then
+    docker cp /opt/claude-bot/avatar.png campfire:/tmp/avatar.png 2>/dev/null &&
+    docker exec campfire bin/rails runner '
+      bot = User.active_bots.order(:id).first
+      if bot && !bot.avatar.attached?
+        bot.avatar.attach(io: File.open("/tmp/avatar.png"),
+                          filename: "app-smoothly.png", content_type: "image/png")
+      end
+    ' >/dev/null 2>&1 && echo "  avatar set"
+fi
+
 systemctl enable --now claude-bot
 
 # Rooms. #workspace is a DIRECT room on purpose: Campfire delivers every
