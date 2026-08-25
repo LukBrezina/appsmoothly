@@ -19,7 +19,7 @@ BOT_KEY=$(docker exec campfire bin/rails runner "
   # The bot's name is the label Campfire shows for the direct room -- room.name
   # is ignored for direct rooms -- so this is effectively the chat's title.
   bot = User.active_bots.order(:id).first ||
-        User.create_bot!(name: 'App Smoothly', email_address: 'claude@bot.local',
+        User.create_bot!(name: 'AppSmoothly', email_address: 'claude@bot.local',
                          password: SecureRandom.hex(16),
                          webhook_url: 'http://$GW:4488/hook/$BRIDGE_SECRET')
   puts bot.bot_key
@@ -71,18 +71,16 @@ docker exec campfire bin/rails runner '
   if user && bot
     Current.user = user
     ws = Rooms::Direct.find_or_create_for([ user, bot ])
-    ws.update!(name: "App Smoothly") unless ws.name == "App Smoothly"
+    ws.update!(name: "AppSmoothly") unless ws.name == "AppSmoothly"
     # Campfire lands you on Current.user.rooms.original -- the oldest room --
     # so make this one the oldest.
     oldest = Room.order(:created_at).first
     ws.update_column(:created_at, oldest.created_at - 60) if oldest && oldest.id != ws.id
     Room.find_by(name: "System") ||
       Rooms::Open.create_for({ name: "System" }, users: [ user, bot ])
-    # Campfire creates "All Talk" at first-run. It is an OPEN room, so the bot
-    # only answers there when tagged -- which reads as the bot being broken.
-    # Remove it while it is still empty so #workspace is the obvious place.
-    at = Room.find_by(name: "All Talk")
-    at.destroy if at && at.messages.none?
+    # "All Talk" stays. It is an open room, so the bot only answers there when
+    # tagged -- which is the point: it is a channel to post into, with the
+    # direct room for conversation.
   end
 ' >/dev/null 2>&1 && echo "  rooms: workspace + System"
 
