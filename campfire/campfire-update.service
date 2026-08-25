@@ -1,0 +1,9 @@
+[Unit]
+Description=Update Campfire from upstream and rebuild the image
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/campfire-update
+TimeoutStartSec=3600

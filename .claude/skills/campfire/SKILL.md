@@ -75,7 +75,7 @@ The source can be checked out under `projects/once-campfire`. It is a Rails app
 built into a Docker image — after editing you must rebuild the image and
 restart the service, not just reload:
 
-    cd ~/work/appsmoothly/projects/once-campfire
+    cd /home/appsmoothly/projects/once-campfire
     sudo docker build -t campfire:local .
     sudo systemctl restart campfire
 

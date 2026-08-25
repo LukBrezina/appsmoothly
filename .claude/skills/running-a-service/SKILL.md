@@ -41,7 +41,7 @@ reboot, after a snapshot rollback — and anything not managed by systemd is gon
 
     [Service]
     User=lukas
-    WorkingDirectory=/home/lukas/work/appsmoothly/projects/myapp
+    WorkingDirectory=/home/appsmoothly/projects/myapp
     ExecStart=/usr/bin/env bash -lc 'bin/rails s -b 0.0.0.0 -p 3000'
     Restart=on-failure
     RestartSec=5s

@@ -20,7 +20,7 @@ Pick a port nobody is using and a hostname prefix:
 Start the thing on loopback (see `running-a-service` for a systemd unit — do
 that if it should survive a reboot):
 
-    cd ~/work/appsmoothly/projects/myapp
+    cd /home/appsmoothly/projects/myapp
     git worktree add ../myapp-$PREVIEW origin/some-branch
     cd ../myapp-$PREVIEW
     bin/rails s -b 127.0.0.1 -p $PORT

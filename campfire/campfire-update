@@ -2,7 +2,7 @@
 # Pull the latest Campfire from upstream, rebuild the image, restart the service.
 # The Docker volume holds the database and uploads, so this keeps your messages.
 set -euo pipefail
-SRC=/home/lukas/work/appsmoothly/projects/once-campfire
+SRC=/home/appsmoothly/projects/once-campfire
 [ -d "$SRC/.git" ] || { echo "no checkout at $SRC" >&2; exit 1; }
 
 echo "==> fetching upstream"

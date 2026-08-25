@@ -1,0 +1,7 @@
+[Unit]
+Description=Update the appsmoothly workspace (skills, CLAUDE.md, runtime)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/appsmoothly-update

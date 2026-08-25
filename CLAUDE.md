@@ -77,7 +77,30 @@ should ask the human rather than trying to reach out.
 
 ## Layout
 
-    ~/work/appsmoothly/        this repo
-      .claude/skills/          how to do specific things
-      campfire/                Campfire + bot runtime
-      projects/                project sources (gitignored, per-VM)
+`/home/appsmoothly` **is** this repo, and it is your working directory.
+
+    /home/appsmoothly/
+      CLAUDE.md            this file
+      .claude/skills/      how to do specific things
+      campfire/            Campfire + bot runtime
+      projects/            project sources (gitignored, per-VM)
+        once-campfire/     Campfire's own source, tracking upstream
+
+## This repo updates itself
+
+`appsmoothly-update.timer` fast-forwards `/home/appsmoothly` from `origin/main`
+every 15 minutes, so skills and instructions stay current without anyone
+redeploying a VM.
+
+**It refuses to run if the working tree is dirty.** That protects your edits,
+but it also means uncommitted changes silently stop you receiving updates. If
+you change something here, either commit and push it, or revert it:
+
+    sudo /usr/local/sbin/appsmoothly-update      # see what it says
+    git -C /home/appsmoothly status --short
+
+`projects/` is gitignored, so working in there never blocks updates.
+
+Campfire's own source updates the same way on a daily timer
+(`campfire-update.timer`): fetch, fast-forward, rebuild the image, restart. The
+Docker volume holds the database, so messages survive a rebuild.

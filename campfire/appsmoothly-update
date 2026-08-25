@@ -1,0 +1,33 @@
+#!/bin/bash
+# Keep /home/appsmoothly (CLAUDE.md, skills, campfire runtime) current with
+# origin. Fast-forward only: if the working tree has local edits or diverges,
+# this fails loudly rather than throwing your work away.
+set -euo pipefail
+REPO=/home/appsmoothly
+[ -d "$REPO/.git" ] || { echo "no checkout at $REPO"; exit 0; }
+
+cd "$REPO"
+
+# Check explicitly rather than relying on git refusing: when there is nothing
+# to pull, `merge --ff-only` succeeds even with a dirty tree, so a silent exit
+# would not mean "your edits are safe".
+if [ -n "$(sudo -u lukas git status --porcelain)" ]; then
+    echo "working tree has uncommitted changes -- not updating. Commit or stash:" >&2
+    sudo -u lukas git status --short | head -10 >&2
+    exit 0
+fi
+
+BEFORE=$(sudo -u lukas git rev-parse HEAD)
+sudo -u lukas git fetch --quiet origin
+
+if ! sudo -u lukas git merge --ff-only --quiet origin/main 2>/dev/null; then
+    echo "not fast-forwardable -- local commits or a dirty tree. Left alone." >&2
+    sudo -u lukas git status --short | head -10 >&2
+    exit 0
+fi
+
+AFTER=$(sudo -u lukas git rev-parse HEAD)
+if [ "$BEFORE" != "$AFTER" ]; then
+    echo "updated $(echo "$BEFORE" | cut -c1-7) -> $(echo "$AFTER" | cut -c1-7)"
+    sudo -u lukas git log --oneline "$BEFORE..$AFTER" | head -10
+fi

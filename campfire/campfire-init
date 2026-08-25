@@ -57,13 +57,13 @@ LISTEN_ADDR=$GW
 LISTEN_PORT=4488
 CAMPFIRE_BASE=http://127.0.0.1:8080
 CLAUDE_BIN=/usr/local/bin/claude
-WORKDIR=/home/lukas/work
+WORKDIR=/home/appsmoothly
 SESSIONS_FILE=/home/lukas/.local/state/claude-bot/sessions.json
 CAMPFIRE_BOT_KEY=$BOT_KEY
 EOF
 chown lukas:lukas /home/lukas/.config/claude-bot/config.env
 chmod 600 /home/lukas/.config/claude-bot/config.env
-install -d -o lukas -g lukas /home/lukas/work
+install -d -o lukas -g lukas /home/appsmoothly
 
 systemctl enable --now claude-bot
 
