@@ -2,17 +2,19 @@
 # Pull the latest Campfire from upstream, rebuild the image, restart the service.
 # The Docker volume holds the database and uploads, so this keeps your messages.
 set -euo pipefail
+# Every git invocation runs as lukas: the checkout is lukas-owned and git
+# refuses to operate on a repo owned by another uid ("dubious ownership").
 SRC=/home/appsmoothly/projects/once-campfire
 [ -d "$SRC/.git" ] || { echo "no checkout at $SRC" >&2; exit 1; }
 
 echo "==> fetching upstream"
 sudo -u lukas git -C "$SRC" fetch --quiet origin
-BEFORE=$(git -C "$SRC" rev-parse HEAD)
+BEFORE=$(sudo -u lukas git -C "$SRC" rev-parse HEAD)
 sudo -u lukas git -C "$SRC" merge --ff-only origin/main
-AFTER=$(git -C "$SRC" rev-parse HEAD)
+AFTER=$(sudo -u lukas git -C "$SRC" rev-parse HEAD)
 
 if [ "$BEFORE" = "$AFTER" ]; then
-    echo "==> already up to date ($(git -C "$SRC" log -1 --format=%h))"
+    echo "==> already up to date ($(sudo -u lukas git -C "$SRC" log -1 --format=%h))"
     [ "${1:-}" = "--force" ] || exit 0
 fi
 
