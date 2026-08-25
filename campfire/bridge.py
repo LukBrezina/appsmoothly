@@ -156,7 +156,7 @@ def unseen_context(room, trigger_message_id, last_seen):
     return "[Messages since your last reply]\n" + "\n".join(lines) + "\n\n"
 
 
-def run_claude(room_id, prompt):
+def run_claude(room_id, prompt, room_path=None):
     session_id = load_sessions().get(str(room_id), {}).get("session")
     cmd = [CLAUDE_BIN, "-p", "--output-format", "json", "--dangerously-skip-permissions"]
     if session_id:
@@ -165,6 +165,11 @@ def run_claude(room_id, prompt):
         prompt = FIRST_MESSAGE_PREAMBLE + prompt
     env = dict(os.environ)
     env["PATH"] = os.path.dirname(CLAUDE_BIN) + os.pathsep + env.get("PATH", "")
+    # Let anything Claude runs answer in the room the request came from, rather
+    # than guessing. ask-secret uses these.
+    if room_path:
+        env["CAMPFIRE_ROOM_PATH"] = room_path
+    env["CAMPFIRE_BASE"] = CAMPFIRE_BASE
     proc = subprocess.run(
         cmd + [prompt], cwd=WORKDIR, env=env,
         capture_output=True, text=True, timeout=CLAUDE_TIMEOUT,
@@ -174,7 +179,7 @@ def run_claude(room_id, prompt):
         if session_id:
             log(f"room {room_id}: resume failed ({proc.returncode}), retrying fresh session")
             update_room_state(room_id, session=None)
-            return run_claude(room_id, prompt)
+            return run_claude(room_id, prompt, room_path)
         raise RuntimeError(f"claude exited {proc.returncode}: {proc.stderr[-2000:]}")
     result = json.loads(proc.stdout)
     if result.get("session_id"):
@@ -213,7 +218,7 @@ def handle_mention(payload):
 
     try:
         with room_lock(room["id"]):
-            reply = run_claude(room["id"], prompt)
+            reply = run_claude(room["id"], prompt, room_path)
     except subprocess.TimeoutExpired:
         reply = f"⚠️ I gave up after {CLAUDE_TIMEOUT // 60} minutes — the task ran too long."
     except Exception as e:

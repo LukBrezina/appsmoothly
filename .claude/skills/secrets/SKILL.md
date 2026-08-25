@@ -10,9 +10,13 @@ the transcript is the one place a credential should not live.
 
     ask-secret GITHUB_TOKEN "to push the project repo"
 
-That posts a **one-time link** into `#App Smoothly`. The human opens it, pastes the
-value into a form, and it lands in `~/.secrets/GITHUB_TOKEN` (`0600`, yours to
-read). You get a confirmation in chat; the value itself never appears there.
+That posts a **one-time link into whichever room you were addressed in** — the
+bridge passes the room through, so a request made in one room does not surface
+in another. The human opens the link, pastes the value into a form, and it lands
+in `~/.secrets/GITHUB_TOKEN` (`0600`, yours to read). The confirmation comes
+back in the same room; the value itself never appears in chat.
+
+Run outside chat (a shell, a timer), it falls back to the direct room.
 
 The link works once. Asking again issues a new one.
 
