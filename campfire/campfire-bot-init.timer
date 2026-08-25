@@ -1,0 +1,10 @@
+[Unit]
+Description=Wait for Campfire first-run, then create the Claude bot
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

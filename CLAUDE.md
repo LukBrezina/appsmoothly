@@ -13,7 +13,7 @@ services — that is what this box is for.
 
 | | |
 |---|---|
-| **Campfire** | chat, Docker container, internal on `127.0.0.1:8080` |
+| **Campfire** | chat, Docker container, internal on `127.0.0.1:8080`. Unconfigured until a human completes `/first_run` |
 | **Claude bot** | `claude-bot.service` — a bridge from Campfire to `claude -p` |
 | **Docker** | installed and running |
 | **Caddy** | **the router**. Owns `:80`; everything from outside arrives here |

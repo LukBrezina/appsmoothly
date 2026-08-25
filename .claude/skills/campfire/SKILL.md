@@ -6,12 +6,29 @@ description: Work with this VM's Campfire chat instance and the Claude bot in it
 # Campfire and the Claude bot
 
 Campfire is this project's chat, on the main URL. A bot user called **Claude**
-is already in it, wired to a local bridge. When the bot is mentioned in a room
-(or receives any message in a direct room), the bridge runs `claude -p` here and
+is in it, wired to a local bridge. When the bot is mentioned in a room (or
+receives any message in a direct room), the bridge runs `claude -p` here and
 posts the reply back.
 
 **You are usually that bot.** Chat messages are what you receive; your output is
 posted into the room.
+
+## A fresh VM starts unconfigured
+
+Nothing pre-creates an account. On first boot Campfire is running but empty, and
+the main URL lands on **`/first_run`** ("Set up Campfire") where the human
+chooses their own name, email and password.
+
+The bot cannot exist before an account does, so it is created *afterwards*:
+`campfire-bot-init.timer` checks every 30s, and once a human has completed
+first-run it creates the Claude bot, writes the bridge config and starts
+`claude-bot`, then disables itself. Expect the bot to appear within a minute of
+setup.
+
+If the bot never shows up:
+
+    systemctl status campfire-bot-init.timer --no-pager
+    sudo /usr/local/sbin/campfire-bot-init      # run it now and see why
 
 ## The pieces
 
@@ -21,10 +38,11 @@ posted into the room.
 | `claude-bot.service` | `/opt/claude-bot/bridge.py`, listens on the Docker gateway `:4488` |
 | `~/.config/claude-bot/config.env` | bridge config, `0600` — bot key and webhook secret |
 | `/etc/campfire/env` | `SECRET_KEY_BASE`, VAPID keys, `0600` |
-| `/root/campfire-credentials.txt` | the admin login, root-only |
+| `campfire-bot-init.timer` | waits for first-run, then creates the bot |
 
-Every VM generates its **own** secrets and admin password on first boot. Nothing
-is shared between projects.
+Every VM generates its **own** `SECRET_KEY_BASE`, VAPID keypair and bridge
+secret on first boot. Nothing is shared between projects, and no credentials are
+invented for you — the admin login is whatever you set at first-run.
 
 ## When replies stop arriving
 
@@ -54,10 +72,14 @@ The room id is in the header of each message you receive.
 
 ## Admin access
 
-    sudo cat /root/campfire-credentials.txt
+Whatever you chose at first-run. If you have lost it, reset the password from
+the Rails console rather than rebuilding:
 
-Use it to create rooms, invite the bot to a room, or change settings. The bot
-only sees rooms it is a member of.
+    sudo docker exec -it campfire bin/rails console
+    > User.find_by(email_address: 'you@example.com').update!(password: 'new-password')
+
+The bot only sees rooms it is a member of, so invite it to any room you want it
+in.
 
 ## Rails console
 

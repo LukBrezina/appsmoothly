@@ -1,0 +1,48 @@
+#!/bin/bash
+# Creates the Claude bot once a human has completed Campfire's first-run.
+# Runs on a timer until there is an account to attach the bot to, then wires up
+# the bridge and disables itself.
+set -euo pipefail
+STATE=/var/lib/campfire-init
+[ -f "$STATE/bot-done" ] && exit 0
+curl -sf -o /dev/null http://127.0.0.1:8080/up 2>/dev/null || exit 0
+
+if ! docker exec campfire bin/rails runner 'exit(Account.any? ? 0 : 1)' 2>/dev/null; then
+    exit 0   # nobody has set Campfire up yet; try again next tick
+fi
+
+BRIDGE_SECRET=$(cat "$STATE/bridge-secret")
+GW=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
+GW="${GW:-172.17.0.1}"
+
+BOT_KEY=$(docker exec campfire bin/rails runner "
+  bot = User.active_bots.find_by(name: 'Claude') ||
+        User.create_bot!(name: 'Claude', email_address: 'claude@bot.local',
+                         password: SecureRandom.hex(16),
+                         webhook_url: 'http://$GW:4488/hook/$BRIDGE_SECRET')
+  puts bot.bot_key
+" 2>/dev/null | tr -d '\r' | tail -1)
+
+case "$BOT_KEY" in
+  *-*) : ;;
+  *) echo "bot not created yet (got '$BOT_KEY')" >&2; exit 0 ;;
+esac
+
+install -d -m 700 -o lukas -g lukas /home/lukas/.config/claude-bot /home/lukas/.local/state/claude-bot
+cat > /home/lukas/.config/claude-bot/config.env <<EOF
+BRIDGE_SECRET=$BRIDGE_SECRET
+LISTEN_ADDR=$GW
+LISTEN_PORT=4488
+CAMPFIRE_BASE=http://127.0.0.1:8080
+CLAUDE_BIN=/usr/local/bin/claude
+WORKDIR=/home/appsmoothly
+SESSIONS_FILE=/home/lukas/.local/state/claude-bot/sessions.json
+CAMPFIRE_BOT_KEY=$BOT_KEY
+EOF
+chown lukas:lukas /home/lukas/.config/claude-bot/config.env
+chmod 600 /home/lukas/.config/claude-bot/config.env
+
+systemctl enable --now claude-bot
+touch "$STATE/bot-done"
+systemctl disable --now campfire-bot-init.timer 2>/dev/null || true
+echo "Claude bot created and bridge started"

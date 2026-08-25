@@ -1,21 +1,14 @@
 #!/bin/bash
-# First-boot provisioning: unique secrets, admin account and Claude bot for THIS
-# VM. Runs once; a clone of the golden image never inherits another VM's
-# credentials.
+# First-boot: per-VM secrets and a running Campfire. Deliberately does NOT
+# create an account -- you complete Campfire's own first-run in the browser, so
+# the admin identity and password are yours, not invented here.
+#
+# The Claude bot cannot exist before an account does, so it is created
+# afterwards by campfire-bot-init.timer, which waits for you.
 set -euo pipefail
 STATE=/var/lib/campfire-init
 mkdir -p "$STATE" /etc/campfire
 [ -f "$STATE/done" ] && exit 0
-
-ADMIN_EMAIL="${CAMPFIRE_ADMIN_EMAIL:-admin@localhost}"
-ADMIN_NAME="${CAMPFIRE_ADMIN_NAME:-Admin}"
-# NOTE: `tr -dc ... </dev/urandom | head -c N` dies of SIGPIPE (141) and with
-# `set -o pipefail` that aborts the whole script. openssl emits finite output.
-ADMIN_PASS=$(openssl rand -base64 30 | tr -dc 'A-Za-z0-9' | cut -c1-20)
-BRIDGE_SECRET=$(openssl rand -hex 16)
-# Docker's bridge gateway: how the Campfire container reaches the bridge on the host.
-GW=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
-GW="${GW:-172.17.0.1}"
 
 echo "==> generating per-VM secrets"
 {
@@ -23,6 +16,11 @@ echo "==> generating per-VM secrets"
   python3 /opt/claude-bot/vapid-gen.py
 } > /etc/campfire/env
 chmod 600 /etc/campfire/env
+
+# The bridge secret is needed now so the webhook URL is stable once the bot is
+# created later.
+openssl rand -hex 16 > "$STATE/bridge-secret"
+chmod 600 "$STATE/bridge-secret"
 
 echo "==> starting campfire"
 systemctl start campfire
@@ -32,51 +30,6 @@ for i in $(seq 1 60); do
 done
 curl -sf -o /dev/null http://127.0.0.1:8080/up || { echo "campfire did not become healthy" >&2; exit 1; }
 
-echo "==> creating admin account and Claude bot"
-BOT_KEY=$(docker exec campfire bin/rails runner "
-  unless Account.any?
-    FirstRun.create!(name: '$ADMIN_NAME', email_address: '$ADMIN_EMAIL', password: '$ADMIN_PASS')
-  end
-  bot = User.active_bots.find_by(name: 'Claude') ||
-        User.create_bot!(name: 'Claude', email_address: 'claude@bot.local',
-                         password: SecureRandom.hex(16),
-                         webhook_url: 'http://$GW:4488/hook/$BRIDGE_SECRET')
-  puts bot.bot_key
-" 2>/dev/null | tr -d '\r' | tail -1)
-
-case "$BOT_KEY" in
-  *-*) : ;;
-  *) echo "failed to create bot (got: '$BOT_KEY')" >&2; exit 1 ;;
-esac
-
-echo "==> configuring the bridge"
-install -d -m 700 -o lukas -g lukas /home/lukas/.config/claude-bot /home/lukas/.local/state/claude-bot
-cat > /home/lukas/.config/claude-bot/config.env <<EOF
-BRIDGE_SECRET=$BRIDGE_SECRET
-LISTEN_ADDR=$GW
-LISTEN_PORT=4488
-CAMPFIRE_BASE=http://127.0.0.1:8080
-CLAUDE_BIN=/usr/local/bin/claude
-WORKDIR=/home/appsmoothly
-SESSIONS_FILE=/home/lukas/.local/state/claude-bot/sessions.json
-CAMPFIRE_BOT_KEY=$BOT_KEY
-EOF
-chown lukas:lukas /home/lukas/.config/claude-bot/config.env
-chmod 600 /home/lukas/.config/claude-bot/config.env
-install -d -o lukas -g lukas /home/appsmoothly
-
-systemctl enable --now claude-bot
-
-# Credentials for the human, root-only.
-cat > /root/campfire-credentials.txt <<EOF
-Campfire admin
-  email    : $ADMIN_EMAIL
-  password : $ADMIN_PASS
-
-The Claude bot is created and wired to the local bridge.
-Bot key and bridge secret are in /home/lukas/.config/claude-bot/config.env (0600).
-EOF
-chmod 600 /root/campfire-credentials.txt
-
+systemctl start campfire-bot-init.timer
 touch "$STATE/done"
-echo "==> done"
+echo "==> campfire is up and unconfigured; open it and complete first-run"

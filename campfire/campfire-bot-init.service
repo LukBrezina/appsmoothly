@@ -1,0 +1,8 @@
+[Unit]
+Description=Create the Claude bot once Campfire has been set up
+After=campfire.service docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/campfire-bot-init
