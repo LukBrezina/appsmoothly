@@ -5,10 +5,15 @@ description: Work with this VM's Campfire chat instance and the Claude bot in it
 
 # Campfire and the Claude bot
 
-Campfire is this project's chat, on the main URL. A bot user called **Claude**
-is in it, wired to a local bridge. When the bot is mentioned in a room (or
-receives any message in a direct room), the bridge runs `claude -p` here and
-posts the reply back.
+Campfire is this project's chat, on the main URL. A room is a **view onto a
+long-running Claude Code session**, not a request/response API: one `claude`
+process per room stays alive with streaming input and output. Messages are
+written to its stdin; everything it emits — including subagent output, via
+`--forward-subagent-text` — is posted back as it happens.
+
+That means you can type while it is working, follow-ups land in the same
+session, and dispatching to subagents needs no special handling: it is ordinary
+Claude Code, just with chat as the terminal.
 
 **You are usually that bot.** Chat messages are what you receive; your output is
 posted into the room.
