@@ -1,33 +1,82 @@
 #!/bin/bash
-# Keep /home/appsmoothly (CLAUDE.md, skills, campfire runtime) current with
-# origin. Fast-forward only: if the working tree has local edits or diverges,
-# this fails loudly rather than throwing your work away.
-set -euo pipefail
+# Keep /home/appsmoothly current with origin/main.
+#
+# Clean tree + fast-forward is the normal path and should be all that ever
+# happens: this repo only changes when something is pushed to it, and projects/
+# is gitignored so ordinary work cannot dirty the tree.
+#
+# When it CANNOT fast-forward, we do not silently stop. We post into Campfire
+# and let the Claude bot deal with it -- the path you already authorised, and
+# one you can watch and interrupt.
+set -uo pipefail
 REPO=/home/appsmoothly
+STATE=/var/lib/appsmoothly-update
+mkdir -p "$STATE"
 [ -d "$REPO/.git" ] || { echo "no checkout at $REPO"; exit 0; }
 
-cd "$REPO"
+as_lukas() { sudo -u lukas git -C "$REPO" "$@"; }
 
-# Check explicitly rather than relying on git refusing: when there is nothing
-# to pull, `merge --ff-only` succeeds even with a dirty tree, so a silent exit
-# would not mean "your edits are safe".
-if [ -n "$(sudo -u lukas git status --porcelain)" ]; then
-    echo "working tree has uncommitted changes -- not updating. Commit or stash:" >&2
-    sudo -u lukas git status --short | head -10 >&2
+as_lukas fetch --quiet origin 2>/dev/null || { echo "fetch failed"; exit 0; }
+
+BEFORE=$(as_lukas rev-parse HEAD)
+REMOTE=$(as_lukas rev-parse origin/main)
+DIRTY=$(as_lukas status --porcelain)
+
+# Already current and clean.
+[ "$BEFORE" = "$REMOTE" ] && [ -z "$DIRTY" ] && exit 0
+
+# Normal case: take the update.
+if [ -z "$DIRTY" ] && as_lukas merge --ff-only --quiet origin/main 2>/dev/null; then
+    AFTER=$(as_lukas rev-parse HEAD)
+    [ "$BEFORE" != "$AFTER" ] && echo "updated ${BEFORE:0:7} -> ${AFTER:0:7}"
     exit 0
 fi
 
-BEFORE=$(sudo -u lukas git rev-parse HEAD)
-sudo -u lukas git fetch --quiet origin
-
-if ! sudo -u lukas git merge --ff-only --quiet origin/main 2>/dev/null; then
-    echo "not fast-forwardable -- local commits or a dirty tree. Left alone." >&2
-    sudo -u lukas git status --short | head -10 >&2
+# --- cannot fast-forward: ask in chat --------------------------------------
+MARK="$STATE/last-asked"
+if [ -f "$MARK" ] && [ $(( $(date +%s) - $(stat -c %Y "$MARK") )) -lt 21600 ]; then
+    echo "cannot fast-forward; already asked in Campfire within 6h, not repeating"
     exit 0
 fi
 
-AFTER=$(sudo -u lukas git rev-parse HEAD)
-if [ "$BEFORE" != "$AFTER" ]; then
-    echo "updated $(echo "$BEFORE" | cut -c1-7) -> $(echo "$AFTER" | cut -c1-7)"
-    sudo -u lukas git log --oneline "$BEFORE..$AFTER" | head -10
+STATUS=$(as_lukas status --short | head -20)
+LOCAL=$(as_lukas log --oneline "origin/main..HEAD" 2>/dev/null | head -10)
+
+MSG="**The workspace repo could not update.**
+
+\`/home/appsmoothly\` cannot fast-forward from \`origin/main\`.
+
+Local status:
+\`\`\`
+${STATUS:-(clean)}
+\`\`\`
+Local commits not on origin:
+\`\`\`
+${LOCAL:-(none)}
+\`\`\`
+
+Claude — please sort this out. Get the working tree clean and HEAD matching
+origin/main, without discarding anything that looks deliberate. Rebase genuine
+local work onto origin/main and resolve conflicts favouring upstream for shared
+files (CLAUDE.md, .claude/skills/, campfire/). Do not touch projects/, do not
+push, do not force. Say what you did."
+
+if ! docker exec -e MSG="$MSG" campfire bin/rails runner '
+  bot  = User.active_bots.find_by(name: "Claude")
+  user = User.where.not(role: :bot).order(:id).first
+  abort("no bot")  unless bot
+  abort("no user") unless user
+  room = bot.rooms.order(:id).first
+  abort("bot is in no room") unless room
+  msg = room.messages.create!(creator: user, body: ENV["MSG"])
+  # Webhook fan-out lives in the controller, not a model callback, so a message
+  # created here reaches the bot only if we deliver it explicitly.
+  bot.deliver_webhook_later(msg)
+  puts "posted to ##{room.name}"
+' 2>&1 | tr -d '\r'; then
+    echo "could not post to Campfire; leaving the repo alone" >&2
+    exit 0
 fi
+
+touch "$MARK"
+echo "asked Claude in Campfire to resolve it"

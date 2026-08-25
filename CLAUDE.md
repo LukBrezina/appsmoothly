@@ -75,6 +75,13 @@ details, no DNS credentials, nothing that describes the machine hosting you.
 That is deliberate. If a task seems to need it, it belongs on the host and you
 should ask the human rather than trying to reach out.
 
+## Getting a shell here
+
+From the owner's machine it is `ssh <project>.vm` — nothing more. Note the
+project's **web** hostname (`<project>.appsmoothly.com`) is not this machine:
+it points at the proxy that fronts you, so sshing to it lands somewhere else
+entirely.
+
 ## Layout
 
 `/home/appsmoothly` **is** this repo, and it is your working directory.
@@ -89,14 +96,16 @@ should ask the human rather than trying to reach out.
 ## This repo updates itself
 
 `appsmoothly-update.timer` fast-forwards `/home/appsmoothly` from `origin/main`
-every 15 minutes, so skills and instructions stay current without anyone
-redeploying a VM.
+**hourly**, so skills and instructions stay current without redeploying a VM.
 
-**It refuses to run if the working tree is dirty.** That protects your edits,
-but it also means uncommitted changes silently stop you receiving updates. If
-you change something here, either commit and push it, or revert it:
+If it *cannot* fast-forward — local edits, local commits, a genuine conflict —
+it does not stop silently. It **posts into Campfire and asks you (the bot) to
+resolve it**, rate-limited to once every 6 hours. So if you find a message in
+chat about the workspace repo failing to update, that is this: read the status
+it included, get the tree clean and HEAD matching `origin/main`, keep anything
+deliberate, discard obvious scratch, and never touch `projects/`.
 
-    sudo /usr/local/sbin/appsmoothly-update      # see what it says
+    sudo /usr/local/sbin/appsmoothly-update      # run it now and see
     git -C /home/appsmoothly status --short
 
 `projects/` is gitignored, so working in there never blocks updates.
