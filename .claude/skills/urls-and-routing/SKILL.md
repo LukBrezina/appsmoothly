@@ -29,7 +29,7 @@ route file in `/etc/caddy/routes/` is all it takes. See `deploy-previews`.
             -> this VM :80 / :3000
 
 **Tailnet-only projects** skip the VPS: the browser reaches the desktop directly
-over the private network, and the URL carries an explicit `:8443`.
+over the private network. The URL is the same either way.
 
 ## What this means for you
 
