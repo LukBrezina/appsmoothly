@@ -1,0 +1,14 @@
+[Unit]
+Description=First-boot provisioning of Campfire and the Claude bot
+After=docker.service network-online.target
+Requires=docker.service
+ConditionPathExists=!/var/lib/campfire-init/done
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/campfire-init
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

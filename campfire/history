@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Print recent messages from a Campfire room via the bot API.
+
+Usage: history <room_id> [count]     (count defaults to 50)
+
+Reads CAMPFIRE_BASE and CAMPFIRE_BOT_KEY from ~/.config/claude-bot/config.env.
+Only works for rooms the Claude bot is a member of.
+"""
+import json
+import os
+import sys
+import urllib.request
+
+CONFIG = os.path.expanduser("~/.config/claude-bot/config.env")
+
+
+def config():
+    values = {}
+    with open(CONFIG) as f:
+        for line in f:
+            if "=" in line and not line.startswith("#"):
+                key, _, value = line.strip().partition("=")
+                values[key] = value
+    return values
+
+
+def fetch(url):
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read()) if resp.status == 200 else []
+
+
+def main():
+    if len(sys.argv) < 2:
+        sys.exit(__doc__.strip())
+    room_id = sys.argv[1]
+    count = int(sys.argv[2]) if len(sys.argv) > 2 else 50
+
+    cfg = config()
+    base = cfg.get("CAMPFIRE_BASE", "http://127.0.0.1:8080").rstrip("/")
+    key = cfg["CAMPFIRE_BOT_KEY"]
+    url = f"{base}/rooms/{room_id}/{key}/messages"
+
+    messages = fetch(url)
+    while messages and len(messages) < count:
+        older = fetch(f"{url}?before={messages[0]['id']}")
+        if not older:
+            break
+        messages = older + messages
+
+    for m in messages[-count:]:
+        name = (m.get("creator") or {}).get("name", "?")
+        text = (m.get("body") or {}).get("plain_text", "").strip()
+        when = m.get("created_at", "")[:16].replace("T", " ")
+        if text:
+            print(f"[{when}] {name}: {text}")
+
+
+if __name__ == "__main__":
+    main()

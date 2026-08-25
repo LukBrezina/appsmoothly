@@ -1,0 +1,84 @@
+---
+name: campfire
+description: Work with this VM's Campfire chat instance and the Claude bot in it — how the bridge works, restarting it, reading room history, admin access, and modifying Campfire itself. Use when asked about chat, the bot, Campfire, rooms, or when replies stop arriving.
+---
+
+# Campfire and the Claude bot
+
+Campfire is this project's chat, on the main URL. A bot user called **Claude**
+is already in it, wired to a local bridge. When the bot is mentioned in a room
+(or receives any message in a direct room), the bridge runs `claude -p` here and
+posts the reply back.
+
+**You are usually that bot.** Chat messages are what you receive; your output is
+posted into the room.
+
+## The pieces
+
+| | |
+|---|---|
+| `campfire.service` | Docker container, port `80`, data in volume `campfire` |
+| `claude-bot.service` | `/opt/claude-bot/bridge.py`, listens on the Docker gateway `:4488` |
+| `~/.config/claude-bot/config.env` | bridge config, `0600` — bot key and webhook secret |
+| `/etc/campfire/env` | `SECRET_KEY_BASE`, VAPID keys, `0600` |
+| `/root/campfire-credentials.txt` | the admin login, root-only |
+
+Every VM generates its **own** secrets and admin password on first boot. Nothing
+is shared between projects.
+
+## When replies stop arriving
+
+    systemctl status claude-bot campfire --no-pager
+    journalctl -u claude-bot -n 50 --no-pager
+    curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:80/up   # want 200
+
+The bridge listens on the **Docker bridge gateway**, not localhost, because the
+Campfire container has to reach it. Confirm the webhook still points at the
+address the bridge is actually bound to:
+
+    ss -tlnp | grep 4488
+    sudo docker exec campfire bin/rails runner \
+      'puts User.active_bots.first.webhook&.url'
+
+Those two must agree. They can drift if the Docker bridge subnet changes.
+
+    sudo systemctl restart claude-bot
+
+## Reading room history
+
+The bridge only passes you recent messages. For more:
+
+    /opt/claude-bot/history <room-id> [count]     # default 50
+
+The room id is in the header of each message you receive.
+
+## Admin access
+
+    sudo cat /root/campfire-credentials.txt
+
+Use it to create rooms, invite the bot to a room, or change settings. The bot
+only sees rooms it is a member of.
+
+## Rails console
+
+Campfire is a Rails app in a container:
+
+    sudo docker exec -it campfire bin/rails console
+    sudo docker exec campfire bin/rails runner 'puts User.count'
+
+Useful models: `User` (`role: :bot` for bots, `bot_key` for the API key),
+`Room`, `Message`, `Webhook`, `Account`.
+
+## Changing Campfire itself
+
+The source can be checked out under `projects/once-campfire`. It is a Rails app
+built into a Docker image — after editing you must rebuild the image and
+restart the service, not just reload:
+
+    cd ~/work/appsmoothly/projects/once-campfire
+    sudo docker build -t campfire:local .
+    sudo systemctl restart campfire
+
+The container keeps its data in the `campfire` Docker volume, so rebuilding the
+image does not lose messages. **Do not delete that volume** — it holds the
+database and every uploaded file.

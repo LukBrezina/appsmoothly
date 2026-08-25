@@ -1,0 +1,21 @@
+# Per-VM working state. Each VM clones its own project sources in here; none of
+# it belongs in this repo.
+projects/*
+!projects/.gitkeep
+!projects/README.md
+
+# Never commit credentials. Everything secret is injected at VM provision time
+# as root-owned 0600 files (see CLAUDE.md).
+*.env
+!*.env.example
+.env*
+*.key
+*.pem
+config.env
+
+# Rails/node debris, in case a project is worked on from the repo root
+node_modules/
+tmp/
+log/
+storage/
+.DS_Store

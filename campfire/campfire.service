@@ -1,0 +1,23 @@
+[Unit]
+Description=Campfire (chat) for this project
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/campfire/env
+ExecStartPre=-/usr/bin/docker rm -f campfire
+ExecStart=/usr/bin/docker run --rm --name campfire \
+    -p 0.0.0.0:80:80 \
+    -v campfire:/rails/storage \
+    -e SECRET_KEY_BASE \
+    -e VAPID_PRIVATE_KEY \
+    -e VAPID_PUBLIC_KEY \
+    -e RAILS_ENV=production \
+    campfire:local
+ExecStop=/usr/bin/docker stop -t 10 campfire
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
