@@ -51,7 +51,7 @@ over the private network, and the URL carries an explicit `:8443`.
 |---|---|---|
 | Who can reach it | the owner's own devices | anyone |
 | Login | none — the tunnel is the auth | tinyauth (username + password) |
-| URL | `https://<project>.appsmoothly.com:8443` | `https://<project>.appsmoothly.com` |
+| URL | `https://<project>.appsmoothly.com` | `https://<project>.appsmoothly.com` |
 
 Which mode this VM is in was decided when it was created and cannot be changed
 from inside. If you are unsure, ask — it matters a great deal before you put

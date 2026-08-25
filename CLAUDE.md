@@ -23,6 +23,15 @@ The human talks to you through Campfire, often from a phone. Messages you
 receive there are chat messages; what you output is posted back to the room.
 Keep chat replies short — summaries, not walls of text.
 
+Two rooms matter:
+
+* **#workspace** — a *direct* room, so **every** message in it reaches you with
+  no tagging. This is the conversation.
+* **#System** — automated notices: update results, failures, anything the
+  platform reports. Open room, so it does **not** wake you unless a message is
+  deliberately delivered. Post here with `notify "..."`, or `notify --ask "..."`
+  if you want a message that also asks you to act.
+
 ## URLs
 
     https://<project>.appsmoothly.com          -> Campfire (port 80)
@@ -34,8 +43,7 @@ those ports, and there is no certificate to manage in here.
 
 Two exposure modes, decided when the VM was created:
 
-* **tailnet-only** — reachable only from the owner's own devices. URLs carry an
-  explicit `:8443`. No login.
+* **tailnet-only** — reachable only from the owner's own devices. No login.
 * **public** — reachable from anywhere, behind a login (tinyauth).
 
 You cannot change which mode you are in from inside the VM. Ask the human.
