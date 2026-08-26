@@ -23,23 +23,37 @@ The human talks to you through Campfire, often from a phone. Messages you
 receive there are chat messages; what you output is posted back to the room.
 Keep chat replies short — summaries, not walls of text.
 
-Two rooms matter:
+**Anything with structure goes on a page, not into chat.** A table, a
+comparison, a plan, a long code block: write it to `/srv/notes/<name>.html` and
+reply with the link. See the `publishing-notes` skill. Chat carries the verdict;
+the page carries the detail.
 
-* **AppSmoothly** — a *direct* room, so **every** message in it reaches you
-  with no tagging. This is the conversation. It appears under **directs** in the
-  sidebar, not the room list, and is labelled with the bot's name: Campfire
-  ignores `room.name` for direct rooms and shows the other participant instead.
-* **#System** — automated notices: update results, failures, anything the
-  platform reports. Open room, so it does **not** wake you unless a message is
-  deliberately delivered. Post here with `notify "..."`, or `notify --ask "..."`
-  if you want a message that also asks you to act.
-* **#All Talk** and any other open room — post-and-tag. You only see a message
-  there if someone mentions you.
+Rooms are the unit of work. **Every room is a separate Claude session**, and a
+room can run in its own directory — so a feature gets its own room, its own
+conversation and its own worktree. Open one with `room new`, close it when the
+work ships. See the `feature-rooms` skill.
+
+A room is either **watched** — you answer every message in it, no tagging — or
+**tag-only**. `room list` says which. All of them are ordinary open rooms that
+everyone in the project can read; none of this depends on a private DM, so a
+colleague can follow any of it.
+
+* **#AppSmoothly** — watched. The main conversation, and where you land.
+* **feature rooms** — watched, one per piece of work, created by `room new`.
+* **#System** — tag-only. Automated notices: update results, failures, anything
+  the platform reports. Post here with `notify "..."`, or `notify --ask "..."`
+  for a message that also asks you to act.
+* **#All Talk** and any other open room — tag-only. You only see a message there
+  if someone mentions you.
+
+A direct message to the bot also reaches you, always — Campfire delivers every
+message in a direct room. Use it the same way; it is just not public.
 
 ## URLs
 
     https://<project>.appsmoothly.com          -> Campfire (port 80)
     https://app.<project>.appsmoothly.com      -> your app (port 3000)
+    https://notes.<project>.appsmoothly.com    -> /srv/notes — pages you publish
     https://<anything>.<project>.appsmoothly.com -> Campfire (wildcard)
 
 TLS terminates outside this VM. You will only ever see plain HTTP arriving on
@@ -138,7 +152,10 @@ delegating does not hide progress.
       CLAUDE.md            this file
       .claude/skills/      how to do specific things
       .claude/agents/      subagents, each pinned to a model
-      campfire/            Campfire + bot runtime
+      campfire/            Campfire + bot runtime — this is the live runtime,
+                           not a copy of it (see below)
+        initializers/      additive patches to Campfire, applied at image build
+        routes/            Caddy route files shipped to every VM
       projects/            project sources (gitignored, per-VM)
         once-campfire/     Campfire's own source, tracking upstream
 
@@ -168,6 +185,16 @@ deliberate, discard obvious scratch, and never touch `projects/`.
 
     sudo /usr/local/sbin/appsmoothly-update      # run it now and see
     git -C /home/appsmoothly status --short
+
+`campfire/` in this repo is not documentation of the runtime, it **is** the
+runtime. When the update pulls a change there, `appsmoothly-install` puts it
+into service — the bridge into `/opt/claude-bot`, the commands into
+`/usr/local/bin`, the units into systemd, the route files into Caddy, the
+initializers into the Campfire image — and restarts only what changed. So a
+change pushed to this repo reaches VMs that already exist, not just the next one
+built. Run it by hand after editing anything in there:
+
+    sudo /usr/local/sbin/appsmoothly-install
 
 `projects/` is gitignored, so working in there never blocks updates.
 

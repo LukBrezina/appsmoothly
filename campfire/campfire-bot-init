@@ -70,29 +70,34 @@ fi
 
 systemctl enable --now claude-bot
 
-# Rooms. #workspace is a DIRECT room on purpose: Campfire delivers every
-# message in a direct room to the bots in it, so Claude sees everything there
-# without being tagged. #System is an open room, which only reaches a bot when
-# a message is explicitly delivered to it -- so automated notices land there
-# without waking Claude.
+# Rooms.
+#
+# The main room is an ORDINARY OPEN ROOM, not a DM. Everyone in the project can
+# read it, which is the point: the conversation that produced a feature is worth
+# a colleague being able to scroll back through. Claude still answers every
+# message there without being tagged, because its membership is
+# `involvement: everything` -- see campfire/initializers/appsmoothly_agent_rooms.rb.
+#
+# #System stays tag-only, so automated notices land there without waking Claude.
+# #All Talk is Campfire's own default room and is left alone.
 docker exec campfire bin/rails runner '
   user = User.where.not(role: :bot).order(:id).first
   bot  = User.active_bots.order(:id).first
   if user && bot
     Current.user = user
-    ws = Rooms::Direct.find_or_create_for([ user, bot ])
-    ws.update!(name: "AppSmoothly") unless ws.name == "AppSmoothly"
-    # Campfire lands you on Current.user.rooms.original -- the oldest room --
-    # so make this one the oldest.
+
+    ws = Room.where(name: "AppSmoothly").where.not(type: "Rooms::Direct").order(:id).first
+    ws ||= Rooms::Open.create_for({ name: "AppSmoothly" }, users: (User.active.to_a | [ bot ]))
+    ws.memberships.where(user_id: bot.id).update_all(involvement: "everything")
+
+    # Campfire lands you on the oldest room you are in, so make this it.
     oldest = Room.order(:created_at).first
     ws.update_column(:created_at, oldest.created_at - 60) if oldest && oldest.id != ws.id
+
     Room.find_by(name: "System") ||
       Rooms::Open.create_for({ name: "System" }, users: [ user, bot ])
-    # "All Talk" stays. It is an open room, so the bot only answers there when
-    # tagged -- which is the point: it is a channel to post into, with the
-    # direct room for conversation.
   end
-' >/dev/null 2>&1 && echo "  rooms: workspace + System"
+' >/dev/null 2>&1 && echo "  rooms: AppSmoothly (open, watched) + System"
 
 touch "$STATE/bot-done"
 systemctl disable --now campfire-bot-init.timer 2>/dev/null || true

@@ -18,8 +18,23 @@ if [ "$BEFORE" = "$AFTER" ]; then
     [ "${1:-}" = "--force" ] || exit 0
 fi
 
+# Our own additions live outside the upstream tree as new files, so the
+# fast-forward above can never conflict with them -- but they do have to be back
+# in place before the image is built.
+INIT=/home/appsmoothly/campfire/initializers
+if [ -d "$INIT" ]; then
+    install -d -m 755 "$SRC/config/initializers"
+    for f in "$INIT"/*.rb; do
+        [ -e "$f" ] || continue
+        install -m 644 -o lukas -g lukas "$f" "$SRC/config/initializers/$(basename "$f")"
+    done
+    echo "==> initializers: $(ls "$INIT" | tr '\n' ' ')"
+fi
+
 echo "==> building image"
-docker build -q -t campfire:local "$SRC"
+# BuildKit is required: the Dockerfile uses COPY --chmod, which the legacy
+# builder rejects. Needs the docker-buildx package.
+DOCKER_BUILDKIT=1 docker build -q -t campfire:local "$SRC"
 echo "==> restarting"
 systemctl restart campfire
 for i in $(seq 1 40); do

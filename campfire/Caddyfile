@@ -4,11 +4,17 @@
 #
 # Hostname-agnostic on purpose: the VM does not know its own project name, and
 # matching on the leading label means this file is identical in every VM.
+#
+# Everything reaching :80 already had TLS terminated upstream (outside this
+# VM), so it's always really https — tell upstream apps that explicitly, or
+# they compute http:// URLs and reject same-origin checks (CSRF, etc).
 :80 {
 	# app.<project>...  -> the project's application
 	@app header_regexp Host ^app\.
 	handle @app {
-		reverse_proxy 127.0.0.1:3000
+		reverse_proxy 127.0.0.1:3000 {
+			header_up X-Forwarded-Proto https
+		}
 	}
 
 	# Anything you add yourself. Drop a file in /etc/caddy/routes/ with its own
@@ -17,6 +23,8 @@
 
 	# Everything else -> Campfire, including the project's main hostname.
 	handle {
-		reverse_proxy 127.0.0.1:8080
+		reverse_proxy 127.0.0.1:8080 {
+			header_up X-Forwarded-Proto https
+		}
 	}
 }

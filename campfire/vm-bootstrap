@@ -31,5 +31,14 @@ fi
 clone_or_update https://github.com/basecamp/once-campfire.git "$REPO/projects/once-campfire"
 
 chown -R lukas:lukas "$REPO"
+
+# The repo carries the runtime as well as the instructions, so put it into
+# service now. The copy that just came out of the repo wins over whatever the
+# image was built with -- that is what lets the repo, rather than the golden
+# image, be the source of truth for everything under campfire/.
+if [ -x "$REPO/campfire/appsmoothly-install" ]; then
+    "$REPO/campfire/appsmoothly-install" || echo "  WARN: install step failed" >&2
+fi
+
 touch "$STATE/bootstrapped"
 echo "bootstrapped $REPO"

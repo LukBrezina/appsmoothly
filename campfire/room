@@ -1,0 +1,213 @@
+#!/bin/bash
+# room -- rooms Claude actually talks in.
+#
+#   room new "Search rewrite" [--cwd DIR]   create an open room with its own
+#                                           Claude session, everyone can read it
+#   room list                               what exists, watched or tag-only,
+#                                           and where each session runs
+#   room watch <name|id> [--cwd DIR]        make Claude answer everything here
+#   room unwatch <name|id>                  back to tag-only
+#   room close <name|id>                    delete the room and end its session
+#
+# A *watched* room is an ordinary open room -- visible to everyone in the
+# project, so a colleague can follow along -- in which Claude replies to every
+# message without being tagged. One room, one Claude session, one working
+# directory. That is the unit: give a feature a room, close the room when the
+# feature ships.
+set -euo pipefail
+
+STATE="${HOME}/.local/state/claude-bot"
+ROOMS_FILE="$STATE/rooms.json"
+CONF="${HOME}/.config/claude-bot/config.env"
+
+dexec() {
+    if docker ps >/dev/null 2>&1; then docker exec "$@"
+    else sudo -n docker exec "$@"; fi
+}
+
+# Run Ruby inside the Campfire container. Values are passed through the
+# environment, never interpolated into the script -- a room title is arbitrary
+# text and would otherwise be a quoting bug waiting to happen.
+rails_runner() {
+    local script="$1"; shift
+    dexec "$@" campfire bin/rails runner "$script" 2>&1 | tr -d '\r'
+}
+
+usage() { sed -n '2,/^set -euo/p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit "${1:-1}"; }
+
+# --- the room -> session mapping the bridge reads --------------------------
+map_set() {  # <room_id> <cwd>
+    mkdir -p "$STATE"
+    python3 - "$ROOMS_FILE" "$1" "$2" <<'PY'
+import json, os, sys
+path, room_id, cwd = sys.argv[1:4]
+try:
+    with open(path) as f: data = json.load(f)
+except Exception: data = {}
+entry = data.get(room_id, {})
+if cwd: entry["cwd"] = cwd
+else: entry.pop("cwd", None)
+if entry: data[room_id] = entry
+else: data.pop(room_id, None)
+tmp = path + ".tmp"
+with open(tmp, "w") as f: json.dump(data, f, indent=2)
+os.replace(tmp, path)
+PY
+}
+
+map_get() {  # <room_id> -> cwd or ""
+    python3 - "$ROOMS_FILE" "$1" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as f: print((json.load(f).get(sys.argv[2]) or {}).get("cwd", ""))
+except Exception: pass
+PY
+}
+
+map_del() { map_set "$1" ""; }
+
+# Ask the bridge to end a room's Claude session. Best-effort: if the bridge is
+# down there is no session to end anyway.
+bridge_close() {
+    [ -r "$CONF" ] || return 0
+    local secret addr port
+    secret=$(sed -n 's/^BRIDGE_SECRET=//p' "$CONF")
+    addr=$(sed -n 's/^LISTEN_ADDR=//p' "$CONF"); addr="${addr:-172.17.0.1}"
+    port=$(sed -n 's/^LISTEN_PORT=//p' "$CONF"); port="${port:-4488}"
+    [ -n "$secret" ] || return 0
+    curl -sS -X POST --max-time 10 "http://$addr:$port/close/$secret/$1" >/dev/null 2>&1 || true
+}
+
+project_url() { echo "https://$(hostname).appsmoothly.com"; }
+
+# --- ruby fragments ---------------------------------------------------------
+FIND_ROOM='
+  key = ENV["ROOM_KEY"]
+  room = key =~ /\A\d+\z/ ? Room.find_by(id: key) : nil
+  room ||= Room.where(name: key).order(:id).first
+  room ||= Room.where("LOWER(name) = ?", key.downcase).order(:id).first
+  abort "no room matching #{key.inspect}" unless room
+'
+
+case "${1:-}" in
+
+new)
+    shift
+    TITLE=""; CWD=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --cwd) CWD="${2:-}"; shift 2 ;;
+            -h|--help) usage 0 ;;
+            *) [ -z "$TITLE" ] && TITLE="$1"; shift ;;
+        esac
+    done
+    [ -n "$TITLE" ] || usage
+    [ -z "$CWD" ] || CWD=$(cd "$CWD" && pwd)   # fail loudly if it does not exist
+
+    OUT=$(ROOM_TITLE="$TITLE" rails_runner '
+      title = ENV["ROOM_TITLE"]
+      user = User.where.not(role: :bot).order(:id).first
+      abort "no human user yet -- finish Campfire first-run" unless user
+      Current.user = user
+      bots = User.active_bots.to_a
+      abort "no bot yet" if bots.empty?
+
+      room = Room.where(name: title).where.not(type: "Rooms::Direct").order(:id).first
+      room ||= Rooms::Open.create_for({ name: title }, users: (User.active.to_a | bots))
+
+      # Everyone in the project sees it. That is the point of not using a DM:
+      # a colleague can read what was built and why.
+      missing = User.active.where.not(id: room.memberships.select(:user_id)).to_a
+      room.memberships.grant_to(missing) if missing.any?
+
+      # `everything` is what makes Claude answer without being tagged.
+      room.memberships.where(user_id: bots.map(&:id)).update_all(involvement: "everything")
+      puts "OK\t#{room.id}"
+    ' -e ROOM_TITLE)
+    case "$OUT" in
+        OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}') ;;
+        *) echo "$OUT" >&2; exit 1 ;;
+    esac
+    [ -n "$CWD" ] && map_set "$ID" "$CWD"
+    bridge_close "$ID"     # start clean if the id was ever used before
+    echo "room  : $TITLE"
+    echo "url   : $(project_url)/rooms/$ID"
+    echo "claude: answers every message here${CWD:+, running in $CWD}"
+    ;;
+
+list)
+    rails_runner '
+      bot_ids = User.active_bots.ids
+      Room.order(:id).each do |r|
+        watched = r.direct? ||
+          r.memberships.where(user_id: bot_ids, involvement: "everything").exists?
+        name = r.name.presence || (r.direct? ? "(direct)" : "(unnamed)")
+        puts [ r.id, r.type.sub("Rooms::", "").downcase,
+               (watched ? "watched" : "tag-only"), name ].join("\t")
+      end
+    ' | while IFS=$'\t' read -r id kind mode name; do
+        [ -n "${id:-}" ] || continue
+        cwd=$(map_get "$id")
+        printf '%-5s %-7s %-9s %-32s %s\n' "$id" "$kind" "$mode" "$name" "${cwd:-}"
+    done
+    ;;
+
+watch|unwatch)
+    ACTION="$1"; shift
+    KEY="${1:-}"; shift || true
+    CWD=""
+    [ "${1:-}" = "--cwd" ] && { CWD=$(cd "${2:-}" && pwd); shift 2; }
+    [ -n "$KEY" ] || usage
+    INV=$([ "$ACTION" = watch ] && echo everything || echo mentions)
+    OUT=$(ROOM_KEY="$KEY" ROOM_INV="$INV" rails_runner "$FIND_ROOM"'
+      if room.direct?
+        abort "#{room.id} is a direct room -- it always reaches the bot"
+      end
+      bots = User.active_bots.to_a
+      absent = bots.reject { |b| room.memberships.exists?(user_id: b.id) }
+      room.memberships.grant_to(absent) if absent.any?
+      room.memberships.where(user_id: bots.map(&:id)).update_all(involvement: ENV["ROOM_INV"])
+      puts "OK\t#{room.id}\t#{room.name}"
+    ' -e ROOM_KEY -e ROOM_INV)
+    case "$OUT" in
+        OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}')
+             NAME=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $3}') ;;
+        *) echo "$OUT" >&2; exit 1 ;;
+    esac
+    [ -n "$CWD" ] && map_set "$ID" "$CWD"
+    if [ "$ACTION" = watch ]; then
+        echo "$NAME ($ID): Claude answers every message${CWD:+, running in $CWD}"
+    else
+        echo "$NAME ($ID): Claude only answers when tagged"
+    fi
+    ;;
+
+close)
+    shift
+    KEY="${1:-}"; [ -n "$KEY" ] || usage
+    OUT=$(ROOM_KEY="$KEY" rails_runner "$FIND_ROOM"'
+      if room.direct?
+        abort "refusing to delete a direct room"
+      end
+      if [ "System", "All Talk", "AppSmoothly" ].include?(room.name)
+        abort "#{room.name.inspect} is a standing room, not a feature room"
+      end
+      id, name = room.id, room.name
+      room.destroy!
+      puts "OK\t#{id}\t#{name}"
+    ' -e ROOM_KEY)
+    case "$OUT" in
+        OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}')
+             NAME=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $3}') ;;
+        *) echo "$OUT" >&2; exit 1 ;;
+    esac
+    bridge_close "$ID"
+    map_del "$ID"
+    echo "closed $NAME ($ID); its Claude session is gone"
+    echo "note: anything else the room used -- a worktree, a route file, a"
+    echo "      service -- is yours to clean up. See deploy-previews."
+    ;;
+
+-h|--help|help|"") usage 0 ;;
+*) echo "room: unknown command '${1}'" >&2; usage ;;
+esac

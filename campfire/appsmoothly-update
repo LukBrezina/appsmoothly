@@ -28,7 +28,13 @@ DIRTY=$(as_lukas status --porcelain)
 # Normal case: take the update.
 if [ -z "$DIRTY" ] && as_lukas merge --ff-only --quiet origin/main 2>/dev/null; then
     AFTER=$(as_lukas rev-parse HEAD)
-    [ "$BEFORE" != "$AFTER" ] && echo "updated ${BEFORE:0:7} -> ${AFTER:0:7}"
+    if [ "$BEFORE" != "$AFTER" ]; then
+        echo "updated ${BEFORE:0:7} -> ${AFTER:0:7}"
+        # A checkout is not an install. campfire/ in that repo is the live
+        # runtime -- bridge, commands, units, routes -- so put the new version
+        # into service instead of waiting for the VM to be rebuilt.
+        "$REPO/campfire/appsmoothly-install" || echo "install step failed" >&2
+    fi
     exit 0
 fi
 
@@ -61,22 +67,10 @@ local work onto origin/main and resolve conflicts favouring upstream for shared
 files (CLAUDE.md, .claude/skills/, campfire/). Do not touch projects/, do not
 push, do not force. Say what you did."
 
-if ! docker exec -e MSG="$MSG" campfire bin/rails runner '
-  bot  = User.active_bots.find_by(name: "Claude")
-  user = User.where.not(role: :bot).order(:id).first
-  abort("no bot")  unless bot
-  abort("no user") unless user
-  room = bot.rooms.order(:id).first
-  abort("bot is in no room") unless room
-  msg = room.messages.create!(creator: user, body: ENV["MSG"])
-  # Webhook fan-out lives in the controller, not a model callback, so a message
-  # created here reaches the bot only if we deliver it explicitly.
-  bot.deliver_webhook_later(msg)
-  puts "posted to ##{room.name}"
-' 2>&1 | tr -d '\r'; then
+if ! printf '%s' "$MSG" | /usr/local/bin/notify --ask; then
     echo "could not post to Campfire; leaving the repo alone" >&2
     exit 0
 fi
 
 touch "$MARK"
-echo "asked Claude in Campfire to resolve it"
+echo "posted to #System and asked Claude to resolve it"

@@ -6,6 +6,10 @@ request/response API. One `claude` process per room stays alive with streaming
 input and output: messages you type are written to its stdin, and everything it
 emits -- including subagent output -- is posted back as it happens.
 
+Rooms are therefore the unit of work: a new room is a new session, and it can
+run in its own directory -- a git worktree for one feature, say -- by way of
+ROOMS_FILE. See the `room` CLI, which is what writes that mapping.
+
 That shape is what Claude Code already supports, so this file stays small. It
 does not reconstruct conversation history, batch messages, resume per message,
 or serialise turns: the session does all of that by existing.
@@ -19,6 +23,7 @@ Config comes from environment variables (see config.env):
   CLAUDE_MODEL    model for the chat session (default sonnet)
   WORKDIR         directory claude runs in
   SESSIONS_FILE   JSON file mapping room id -> claude session id
+  ROOMS_FILE      JSON file mapping room id -> {"cwd": ...}, written by `room`
 """
 
 import html
@@ -40,6 +45,9 @@ WORKDIR = os.environ.get("WORKDIR", "/home/appsmoothly")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet")
 SESSIONS_FILE = os.environ.get(
     "SESSIONS_FILE", os.path.expanduser("~/.local/state/claude-bot/sessions.json")
+)
+ROOMS_FILE = os.environ.get(
+    "ROOMS_FILE", os.path.expanduser("~/.local/state/claude-bot/rooms.json")
 )
 MAX_REPLY_CHARS = 8000
 
@@ -107,12 +115,33 @@ def _save_id(room_id, session_id):
         os.replace(tmp, SESSIONS_FILE)
 
 
+def room_conf(room_id):
+    """Per-room settings written by the `room` CLI. Absent is the normal case."""
+    try:
+        with open(ROOMS_FILE) as f:
+            return json.load(f).get(str(room_id)) or {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def room_workdir(room_id):
+    """Where this room's session runs.
+
+    A feature room can be pointed at its own git worktree, so two rooms working
+    on the same repo do not fight over one checkout. A directory that has since
+    been removed falls back rather than failing every message in that room.
+    """
+    cwd = room_conf(room_id).get("cwd")
+    return cwd if cwd and os.path.isdir(cwd) else WORKDIR
+
+
 class Session:
     """One long-running claude process for one room."""
 
-    def __init__(self, room_id, room_path):
+    def __init__(self, room_id, room_path, room_name=""):
         self.room_id = room_id
         self.room_path = room_path
+        self.room_name = room_name
         self.proc = None
         self.lock = threading.Lock()
 
@@ -139,10 +168,12 @@ class Session:
         env = dict(os.environ)
         env["PATH"] = os.path.dirname(CLAUDE_BIN) + os.pathsep + env.get("PATH", "")
         env["CAMPFIRE_ROOM_PATH"] = self.room_path
+        env["CAMPFIRE_ROOM_NAME"] = self.room_name
         env["CAMPFIRE_BASE"] = CAMPFIRE_BASE
+        cwd = room_workdir(self.room_id)
         try:
             self.proc = subprocess.Popen(
-                cmd, cwd=WORKDIR, env=env, stdin=subprocess.PIPE,
+                cmd, cwd=cwd, env=env, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
             )
         except Exception as e:
@@ -150,8 +181,21 @@ class Session:
             return False
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._drain_stderr, daemon=True).start()
-        log(f"room {self.room_id}: session started{' (resumed)' if resume else ''}")
+        log(f"room {self.room_id}: session started in {cwd}"
+            f"{' (resumed)' if resume else ''}")
         return True
+
+    def stop(self):
+        """End the session for good -- the room it belonged to is gone."""
+        with self.lock:
+            proc, self.proc = self.proc, None
+            if proc and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        _save_id(self.room_id, None)
 
     def _drain_stderr(self):
         for line in self.proc.stderr:
@@ -219,13 +263,22 @@ _sessions = {}
 _sessions_guard = threading.Lock()
 
 
-def session_for(room_id, room_path):
+def session_for(room_id, room_path, room_name=""):
     with _sessions_guard:
         s = _sessions.get(str(room_id))
         if s is None:
-            s = _sessions[str(room_id)] = Session(room_id, room_path)
+            s = _sessions[str(room_id)] = Session(room_id, room_path, room_name)
         s.room_path = room_path
+        s.room_name = room_name
         return s
+
+
+def close_session(room_id):
+    with _sessions_guard:
+        s = _sessions.pop(str(room_id), None)
+    if s:
+        s.stop()
+    return s is not None
 
 
 # --- secret requests -------------------------------------------------------
@@ -347,6 +400,17 @@ class Handler(BaseHTTPRequestHandler):
                                            "You can close this tab."))
             return
 
+        # `room close` deleted a room; end its session rather than leave an
+        # orphaned claude process holding a worktree open. Same shared secret as
+        # the webhook, on the same VM-internal address.
+        m = re.fullmatch(rf"/close/{re.escape(SECRET)}/(\d+)", self.path)
+        if m:
+            room_id = m.group(1)
+            existed = close_session(room_id)
+            log(f"room {room_id}: closed"
+                f" ({'session ended' if existed else 'no session'})")
+            self.send_response(204); self.end_headers(); return
+
         if self.path != f"/hook/{SECRET}":
             self.send_response(404); self.end_headers(); return
         length = int(self.headers.get("Content-Length", 0))
@@ -362,7 +426,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204); self.end_headers()
         who = (payload.get("user") or {}).get("name", "someone")
         log(f"room {room['id']} ({room['name']!r}) <- {who!r}: {text[:120]!r}")
-        s = session_for(room["id"], room["path"])
+        s = session_for(room["id"], room["path"], room.get("name") or "")
         threading.Thread(target=s.send, args=(f"[{who} in #{room['name']}]\n{text}",),
                          daemon=True).start()
 

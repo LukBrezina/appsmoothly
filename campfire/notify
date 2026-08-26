@@ -1,0 +1,40 @@
+#!/bin/bash
+# notify [--ask] <text...>      (or pipe the text on stdin)
+#
+# Post to the #System room in this project's Campfire. System messages -- update
+# results, failures, anything automated -- go here so they stay out of the
+# conversation in #workspace.
+#
+#   --ask   also hand the message to the Claude bot, so it acts on it. Without
+#           this the bot is not woken: #System is an open room, and open rooms
+#           only reach a bot when it is explicitly delivered.
+set -uo pipefail
+ASK=0
+[ "${1:-}" = "--ask" ] && { ASK=1; shift; }
+TEXT="$*"
+[ -n "$TEXT" ] || TEXT="$(cat)"
+[ -n "$TEXT" ] || { echo "notify: nothing to say" >&2; exit 1; }
+
+# `lukas` is not in the docker group on purpose -- that socket is
+# root-equivalent -- so reach the container through sudo when a direct call
+# is refused. Without this, notify failed silently for the agent.
+dexec() {
+    if docker ps >/dev/null 2>&1; then docker exec "$@"
+    else sudo -n docker exec "$@"; fi
+}
+
+dexec -e NOTIFY_TEXT="$TEXT" -e NOTIFY_ASK="$ASK" campfire bin/rails runner '
+  user = User.where.not(role: :bot).order(:id).first
+  abort("no user yet") unless user
+  Current.user = user
+  room = Room.find_by(name: "System")
+  unless room
+    room = Rooms::Open.create_for({ name: "System" },
+             users: [ user, *User.active_bots ].compact)
+  end
+  msg = room.messages.create!(creator: user, body: ENV["NOTIFY_TEXT"])
+  if ENV["NOTIFY_ASK"] == "1"
+    room.users.active_bots.excluding(msg.creator).each { |b| b.deliver_webhook_later(msg) }
+  end
+  puts "posted to ##{room.name}#{ENV["NOTIFY_ASK"] == "1" ? " (bot notified)" : ""}"
+' 2>&1 | tr -d '\r'

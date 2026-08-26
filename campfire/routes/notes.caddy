@@ -1,0 +1,10 @@
+# notes.<project>... -> static pages the agent writes for the human to read.
+#
+# Chat is a bad medium for a benchmark table, a migration plan or anything with
+# structure. /srv/notes is where that goes instead: write an HTML file, send the
+# link. Directory browsing is on, so old notes stay findable.
+@notes header_regexp Host ^notes\.
+handle @notes {
+	root * /srv/notes
+	file_server browse
+}

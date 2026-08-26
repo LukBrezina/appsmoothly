@@ -1,0 +1,104 @@
+#!/bin/bash
+# appsmoothly-install -- put the runtime that lives in the workspace repo into
+# service.
+#
+# /home/appsmoothly is a git checkout that fast-forwards hourly, and its
+# campfire/ directory is the source of truth for the bridge, the helper CLIs,
+# the systemd units, the Caddy route files and the Campfire initializers. A
+# checkout is not an install: this is the step that makes a pushed change take
+# effect -- on VMs that already exist, not just on the next one built.
+#
+# Idempotent and quiet: it compares before it copies, and only restarts what
+# actually changed. Safe to run on every update tick.
+#
+# Note this means a push to the workspace repo runs as root in the VM. That is
+# no wider than what is already true -- `lukas` has passwordless sudo in here
+# and the agent runs as `lukas` -- and the VM is the security boundary, not the
+# user account inside it.
+set -euo pipefail
+
+REPO=/home/appsmoothly
+SRC="$REPO/campfire"
+CAMPFIRE_SRC="$REPO/projects/once-campfire"
+[ -d "$SRC" ] || { echo "appsmoothly-install: no $SRC yet"; exit 0; }
+
+bridge_changed=0; units_changed=0; caddy_changed=0; rails_changed=0
+
+put() {  # <mode> <src> <dst>   -> 0 if it changed
+    local mode="$1" src="$2" dst="$3"
+    [ -f "$src" ] || return 1
+    if cmp -s "$src" "$dst" 2>/dev/null; then return 1; fi
+    install -D -m "$mode" -o root -g root "$src" "$dst"
+    echo "  $dst"
+    return 0
+}
+
+echo "==> runtime"
+install -d -m 755 /opt/claude-bot
+put 755 "$SRC/bridge.py"    /opt/claude-bot/bridge.py    && bridge_changed=1
+put 755 "$SRC/vapid-gen.py" /opt/claude-bot/vapid-gen.py || true
+put 644 "$SRC/avatar.png"   /opt/claude-bot/avatar.png   || true
+
+echo "==> commands"
+for f in notify ask-secret secret room history; do
+    put 755 "$SRC/$f" "/usr/local/bin/$f" || true
+done
+for f in appsmoothly-update appsmoothly-install campfire-init campfire-bot-init \
+         campfire-update vm-bootstrap; do
+    put 755 "$SRC/$f" "/usr/local/sbin/$f" || true
+done
+
+echo "==> units"
+for f in "$SRC"/*.service "$SRC"/*.timer; do
+    [ -e "$f" ] || continue
+    put 644 "$f" "/etc/systemd/system/$(basename "$f")" && units_changed=1
+done
+
+echo "==> routing"
+# Static pages the agent publishes for the human to read -- see the
+# publishing-notes skill. Owned by the agent's user so it can just write files.
+install -d -m 755 -o lukas -g lukas /srv/notes
+install -d -m 755 /etc/caddy/routes
+put 644 "$SRC/Caddyfile" /etc/caddy/Caddyfile && caddy_changed=1
+for f in "$SRC"/routes/*.caddy; do
+    [ -e "$f" ] || continue
+    put 644 "$f" "/etc/caddy/routes/$(basename "$f")" && caddy_changed=1
+done
+
+echo "==> campfire initializers"
+# Additive patches to Campfire, kept as new files so the upstream checkout can
+# still fast-forward. They only take effect once the image is rebuilt.
+if [ -d "$CAMPFIRE_SRC/config/initializers" ]; then
+    for f in "$SRC"/initializers/*.rb; do
+        [ -e "$f" ] || continue
+        put 644 "$f" "$CAMPFIRE_SRC/config/initializers/$(basename "$f")" && rails_changed=1
+    done
+fi
+
+echo "==> applying"
+if [ "$units_changed" = 1 ]; then
+    systemctl daemon-reload
+    echo "  systemd reloaded"
+fi
+if [ "$bridge_changed" = 1 ] || [ "$units_changed" = 1 ]; then
+    systemctl is-enabled claude-bot >/dev/null 2>&1 &&
+        { systemctl restart claude-bot; echo "  claude-bot restarted"; }
+fi
+if [ "$caddy_changed" = 1 ]; then
+    if caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+        systemctl reload caddy 2>/dev/null || systemctl restart caddy
+        echo "  caddy reloaded"
+    else
+        echo "  WARNING: Caddy config does not validate; NOT reloading" >&2
+        caddy validate --config /etc/caddy/Caddyfile 2>&1 | tail -5 >&2
+    fi
+fi
+if [ "$rails_changed" = 1 ]; then
+    # A rebuild is minutes, so it only happens when an initializer really moved.
+    echo "  campfire initializers changed -- rebuilding the image"
+    /usr/local/sbin/campfire-update --force || echo "  WARNING: rebuild failed" >&2
+fi
+
+[ "$bridge_changed$units_changed$caddy_changed$rails_changed" = "0000" ] &&
+    echo "  nothing to do"
+exit 0
