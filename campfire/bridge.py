@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 import threading
+import time
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -53,6 +54,10 @@ ROOMS_FILE = os.environ.get(
     "ROOMS_FILE", os.path.expanduser("~/.local/state/claude-bot/rooms.json")
 )
 MAX_REPLY_CHARS = 8000
+# How long a turn may go without saying anything before the room is told what
+# it is doing. A test suite or a build is minutes of silence that looks exactly
+# like a dead bot -- which is how it was read the first time it happened.
+QUIET_SECONDS = int(os.environ.get("QUIET_SECONDS", "45"))
 
 sessions_lock = threading.Lock()
 
@@ -118,6 +123,16 @@ def _save_id(room_id, session_id):
         os.replace(tmp, SESSIONS_FILE)
 
 
+def _describe_tool(block):
+    """A few words on what a tool call is doing, for the progress notice."""
+    name = block.get("name") or "working"
+    args = block.get("input") or {}
+    detail = args.get("command") or args.get("file_path") or args.get("pattern") \
+        or args.get("description") or args.get("prompt") or ""
+    detail = " ".join(str(detail).split())[:70]
+    return f"{name}: {detail}" if detail else name
+
+
 def room_conf(room_id):
     """Per-room settings written by the `room` CLI. Absent is the normal case."""
     try:
@@ -157,6 +172,10 @@ class Session:
         self.room_name = room_name
         self.proc = None
         self.lock = threading.Lock()
+        # Turn state, for the "still working" notice.
+        self.turn_started = None     # monotonic time of the last thing it said
+        self.last_tool = None        # what it is busy with
+        self.notified = False        # one notice per quiet stretch, not per tool
 
     def alive(self):
         return self.proc is not None and self.proc.poll() is None
@@ -248,11 +267,38 @@ class Session:
             for block in event.get("message", {}).get("content", []):
                 if block.get("type") == "text" and block.get("text", "").strip():
                     post_reply(self.room_path, block["text"])
+                    self._quiet_reset()          # it just spoke; start the clock over
+                elif block.get("type") == "tool_use":
+                    self.last_tool = _describe_tool(block)
             return
         # "result" repeats the final assistant text, so posting it would double
         # every answer. Errors are the exception -- those are worth surfacing.
-        if kind == "result" and event.get("is_error"):
-            post_reply(self.room_path, f"⚠️ {event.get('result') or 'run failed'}")
+        if kind == "result":
+            self.turn_started = None             # the turn is over; stop watching
+            if event.get("is_error"):
+                post_reply(self.room_path, f"⚠️ {event.get('result') or 'run failed'}")
+
+    def _quiet_reset(self):
+        self.turn_started = time.monotonic()
+        self.notified = False
+
+    def check_quiet(self):
+        """Say what it is busy with, once, if a turn has gone quiet for a while.
+
+        Only ever one notice per quiet stretch: the point is to distinguish
+        "working" from "dead", not to narrate.
+        """
+        started = self.turn_started
+        if started is None or self.notified or not self.alive():
+            return
+        if time.monotonic() - started < QUIET_SECONDS:
+            return
+        self.notified = True
+        what = f" — {self.last_tool}" if self.last_tool else ""
+        try:
+            post_reply(self.room_path, f"⏳ still working{what}", as_html=False)
+        except Exception as e:
+            log(f"room {self.room_id}: could not post progress: {e}")
 
     def send(self, text):
         with self.lock:
@@ -263,6 +309,7 @@ class Session:
             try:
                 self.proc.stdin.write(json.dumps(msg) + "\n")
                 self.proc.stdin.flush()
+                self._quiet_reset()
                 return True
             except Exception as e:
                 log(f"room {self.room_id}: write failed ({e}); restarting")
@@ -449,6 +496,19 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def _quiet_watcher():
+    while True:
+        time.sleep(10)
+        with _sessions_guard:
+            sessions = list(_sessions.values())
+        for s in sessions:
+            try:
+                s.check_quiet()
+            except Exception as e:
+                log(f"quiet watcher: {e}")
+
+
 if __name__ == "__main__":
     log(f"claude-bot bridge listening on {LISTEN_ADDR}:{LISTEN_PORT}, workdir {WORKDIR}")
+    threading.Thread(target=_quiet_watcher, daemon=True).start()
     ThreadingHTTPServer((LISTEN_ADDR, LISTEN_PORT), Handler).serve_forever()

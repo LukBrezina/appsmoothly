@@ -36,9 +36,15 @@ work ships. See the `feature-rooms` skill.
 Two consequences that are easy to get wrong: **everything you say goes to your
 own room** — creating another room does not move you into it — and **a room
 nobody has spoken in has no session**. So open a feature room *with its work*,
-`room new ... --brief "..."`, which starts the session there; then say where you
-went and stop working on it here. `room say <room> "..."` is how you speak into
-a room you are not in.
+`room new ... --brief "..."`: that starts the session there and posts the
+handover, with a link, back into the room you were in. Then stop working on it
+here. `room say <room> "..."` is how you speak into a room you are not in.
+
+When the work is done, **offer** to archive — never do it unasked. `room archive
+<room> --purge` keeps the whole conversation, hides the room, and tears down
+only what was recorded for it with `room set`. See the `feature-rooms` skill,
+which also says which parts of this are the platform's and which are the
+project's.
 
 A room is either **watched** — you answer every message in it, no tagging — or
 **tag-only**. `room list` says which. All of them are ordinary open rooms that

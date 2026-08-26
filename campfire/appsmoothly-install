@@ -84,9 +84,22 @@ if [ "$units_changed" = 1 ]; then
     systemctl daemon-reload
     echo "  systemd reloaded"
 fi
+PENDING=/var/lib/appsmoothly/restart-pending
 if [ "$bridge_changed" = 1 ] || [ "$units_changed" = 1 ]; then
-    systemctl is-enabled claude-bot >/dev/null 2>&1 &&
-        { systemctl restart claude-bot; echo "  claude-bot restarted"; }
+    install -d -m 755 /var/lib/appsmoothly; touch "$PENDING"
+fi
+if [ -f "$PENDING" ] && systemctl is-enabled claude-bot >/dev/null 2>&1; then
+    # Restarting the bridge kills every running session, and a session can be
+    # ten minutes into a test suite. Losing that costs more than the update is
+    # worth, so wait for a quiet moment -- this runs hourly, and the marker
+    # survives until it gets one. The already-installed bridge.py is inert
+    # until the process restarts, so deferring is safe.
+    if pgrep -f "claude.*--input-format stream-json" >/dev/null 2>&1; then
+        echo "  claude-bot update DEFERRED: $(pgrep -cf "claude.*--input-format stream-json") session(s) running"
+        echo "  it will restart on the next idle run, or: sudo systemctl restart claude-bot"
+    else
+        systemctl restart claude-bot; rm -f "$PENDING"; echo "  claude-bot restarted"
+    fi
 fi
 if [ "$caddy_changed" = 1 ]; then
     if caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then

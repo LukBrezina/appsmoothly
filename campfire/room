@@ -2,30 +2,29 @@
 # room -- rooms Claude actually talks in.
 #
 #   room new "Search rewrite" [--cwd DIR] [--brief "..."] [--model M]
-#                                           create an open room with its own
-#                                           Claude session, everyone can read it
-#   room say <name|id> "text"               post into another room from here
-#   room list                               what exists, watched or tag-only,
-#                                           and where each session runs
-#   room watch <name|id> [--cwd DIR] [--model M]
-#                                           make Claude answer everything here
-#   room unwatch <name|id>                  back to tag-only
-#   room close <name|id>                    delete the room and end its session
+#                                   open a room, hand the work over, announce it
+#   room list                       every room: watched, model, directory
+#   room say <name|id> "text"       post into a room you are not in
+#   room set <name|id> [--cwd DIR] [--model M] [--route NAME] [--service UNIT]
+#                                   record what this room runs on and owns
+#   room watch|unwatch <name|id>    answer everything here / only when tagged
+#   room archive <name|id> [--purge]  work is done: hide it, keep the history
+#   room close   <name|id> [--purge]  delete it and its history outright
 #
 # A *watched* room is an ordinary open room -- visible to everyone in the
 # project, so a colleague can follow along -- in which Claude replies to every
 # message without being tagged. One room, one Claude session, one working
-# directory. That is the unit: give a feature a room, close the room when the
-# feature ships.
+# directory, one model. That is the unit: give a feature a room, archive the
+# room when the feature ships.
 #
 # A session only exists once something is said in its room, and its replies go
 # to its own room and nowhere else. So creating a room does NOT move the
 # conversation into it -- pass --brief to start the work there, or use
 # `room say` to speak into a room you are not in.
 #
-# A feature room runs on a stronger model than chat does (opus by default here,
+# A feature room runs on a stronger model than chat does (opus by default,
 # sonnet for ordinary conversation): a room exists in order to get work done,
-# and that is the phase worth paying for. Override per room with --model.
+# and that is the phase worth paying for. Override with --model.
 set -euo pipefail
 
 # A room is created in order to get work done, so it defaults to the model
@@ -35,6 +34,9 @@ FEATURE_MODEL="${ROOM_DEFAULT_MODEL:-opus}"
 STATE="${HOME}/.local/state/claude-bot"
 ROOMS_FILE="$STATE/rooms.json"
 CONF="${HOME}/.config/claude-bot/config.env"
+CAMPFIRE_BASE="${CAMPFIRE_BASE:-http://127.0.0.1:8080}"
+
+usage() { sed -n '2,/^set -euo/p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit "${1:-1}"; }
 
 dexec() {
     if docker ps >/dev/null 2>&1; then docker exec "$@"
@@ -46,6 +48,7 @@ dexec() {
 # arbitrary text and would otherwise be a quoting bug waiting to happen. The
 # value has to be spelled out rather than inherited (`-e NAME`), because the
 # sudo fallback resets the environment and the inherited form would be empty.
+#
 # Callers append `|| true` to the command substitution: `set -e` with
 # `pipefail` would otherwise kill the script on a failed run, before the case
 # that reports *why* it failed -- which is the whole point of capturing it.
@@ -54,9 +57,34 @@ rails_runner() {
     dexec "$@" campfire bin/rails runner "$script" 2>&1 | tr -d '\r'
 }
 
-usage() { sed -n '2,/^set -euo/p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit "${1:-1}"; }
+# Campfire messages are rich text, so a title with an ampersand in it would
+# otherwise arrive as markup.
+esc() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
 
-# --- the room -> session mapping the bridge reads --------------------------
+project_url() { echo "https://$(hostname).appsmoothly.com"; }
+
+# Claude Code ignores a directory's settings.local.json until that directory has
+# been trusted, and a feature worktree is always new. There is no way to answer
+# an interactive trust dialog from chat, and the VM is the security boundary --
+# not a path inside it -- so record trust for the directory we were asked to
+# work in.
+trust_dir() {
+    python3 - "$HOME/.claude.json" "$1" <<'TRUSTPY' 2>/dev/null || true
+import json, os, sys
+path, d = sys.argv[1:3]
+try:
+    with open(path) as f: data = json.load(f)
+except Exception: data = {}
+entry = data.setdefault("projects", {}).setdefault(d, {})
+if entry.get("hasTrustDialogAccepted") is not True:
+    entry["hasTrustDialogAccepted"] = True
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f: json.dump(data, f, indent=2)
+    os.replace(tmp, path)
+TRUSTPY
+}
+
+# --- per-room settings the bridge and teardown read ------------------------
 map_set() {  # <room_id> <key> <value>   (empty value clears the key)
     mkdir -p "$STATE"
     python3 - "$ROOMS_FILE" "$1" "$2" "$3" <<'MAPPY'
@@ -115,34 +143,56 @@ bridge_close() {
     curl -sS -X POST --max-time 10 "http://$addr:$port/close/$secret/$1" >/dev/null 2>&1 || true
 }
 
-project_url() { echo "https://$(hostname).appsmoothly.com"; }
-
-# Campfire messages are rich text, so a title with an ampersand in it would
-# otherwise arrive as markup.
-esc() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
-
-# Claude Code ignores a directory's settings.local.json until that directory has
-# been trusted, and a feature worktree is always new. There is no way to answer
-# an interactive trust dialog from chat, and the VM is the security boundary --
-# not a path inside it -- so record trust for the directory we were just asked
-# to work in.
-trust_dir() {
-    python3 - "$HOME/.claude.json" "$1" <<'TRUSTPY' 2>/dev/null || true
-import json, os, sys
-path, d = sys.argv[1:3]
-try:
-    with open(path) as f: data = json.load(f)
-except Exception: data = {}
-entry = data.setdefault("projects", {}).setdefault(d, {})
-if entry.get("hasTrustDialogAccepted") is not True:
-    entry["hasTrustDialogAccepted"] = True
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f: json.dump(data, f, indent=2)
-    os.replace(tmp, path)
-TRUSTPY
+# Post into whichever room this command was run from. The bridge exports
+# CAMPFIRE_ROOM_PATH for everything it runs, so a room opened from a
+# conversation can announce itself back into that conversation.
+post_here() {
+    [ -n "${CAMPFIRE_ROOM_PATH:-}" ] || return 0
+    curl -sS -X POST -H "Content-Type: text/html" --data-binary "$1" \
+         --max-time 20 "${CAMPFIRE_BASE%/}${CAMPFIRE_ROOM_PATH}" >/dev/null 2>&1 || true
 }
 
-# --- ruby fragments ---------------------------------------------------------
+# Tear down what the room owned. Only ever touches things that were explicitly
+# recorded for it -- see `room set` -- because guessing what a project built is
+# how you delete someone's work.
+purge_room() {  # <room_id>
+    local cwd route service common main
+    cwd=$(map_get "$1" cwd); route=$(map_get "$1" route); service=$(map_get "$1" service)
+
+    if [ -n "$service" ]; then
+        sudo -n systemctl disable --now "$service" >/dev/null 2>&1 &&
+            echo "  stopped $service" || echo "  could not stop $service" >&2
+    fi
+
+    if [ -n "$route" ]; then
+        sudo -n rm -f "/etc/caddy/routes/$route.caddy"
+        if sudo -n caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+            sudo -n systemctl reload caddy >/dev/null 2>&1 && echo "  removed route $route"
+        else
+            echo "  WARNING: Caddy no longer validates; not reloading" >&2
+        fi
+    fi
+
+    # Only a *linked worktree* is removable: a linked worktree has a .git FILE,
+    # a real clone has a .git directory. Refusing on the latter is the whole
+    # guard -- it is the difference between tidying up and deleting the project.
+    if [ -n "$cwd" ] && [ -d "$cwd" ] && [ -f "$cwd/.git" ]; then
+        if [ -n "$(git -C "$cwd" status --porcelain 2>/dev/null)" ]; then
+            echo "  worktree $cwd has uncommitted changes -- left alone" >&2
+        else
+            common=$(git -C "$cwd" rev-parse --git-common-dir 2>/dev/null || echo "")
+            main=$(cd "$(dirname "${common:-/}")" 2>/dev/null && pwd || echo "")
+            if [ -n "$main" ] && git -C "$main" worktree remove "$cwd" 2>/dev/null; then
+                echo "  removed worktree $cwd"
+            else
+                echo "  could not remove worktree $cwd" >&2
+            fi
+        fi
+    elif [ -n "$cwd" ]; then
+        echo "  $cwd is not a linked worktree -- left alone"
+    fi
+}
+
 FIND_ROOM='
   key = ENV["ROOM_KEY"]
   room = key =~ /\A\d+\z/ ? Room.find_by(id: key) : nil
@@ -150,6 +200,7 @@ FIND_ROOM='
   room ||= Room.where("LOWER(name) = ?", key.downcase).order(:id).first
   abort "no room matching #{key.inspect}" unless room
 '
+STANDING='[ "System", "All Talk", "AppSmoothly" ]'
 
 case "${1:-}" in
 
@@ -158,7 +209,7 @@ new)
     TITLE=""; CWD=""; BRIEF=""; MODEL="$FEATURE_MODEL"
     while [ $# -gt 0 ]; do
         case "$1" in
-            --cwd) CWD="${2:-}"; shift 2 ;;
+            --cwd)   CWD="${2:-}"; shift 2 ;;
             --brief) BRIEF="${2:-}"; shift 2 ;;
             --model) MODEL="${2:-}"; shift 2 ;;
             -h|--help) usage 0 ;;
@@ -181,7 +232,8 @@ new)
       room ||= Rooms::Open.create_for({ name: title }, users: (User.active.to_a | bots))
 
       # Everyone in the project sees it. That is the point of not using a DM:
-      # a colleague can read what was built and why.
+      # a colleague can read what was built and why. Campfire also adds any
+      # future user to every open room by itself.
       missing = User.active.where.not(id: room.memberships.select(:user_id)).to_a
       room.memberships.grant_to(missing) if missing.any?
 
@@ -193,27 +245,36 @@ new)
         OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}') ;;
         *) echo "${OUT:-room: the command produced no output}" >&2; exit 1 ;;
     esac
-    [ -n "$CWD" ] && map_set "$ID" cwd "$CWD"
+
+    [ -n "$CWD" ]   && map_set "$ID" cwd "$CWD"
     [ -n "$MODEL" ] && map_set "$ID" model "$MODEL"
     bridge_close "$ID"     # start clean if the id was ever used before
+    URL="$(project_url)/rooms/$ID"
 
     # A brand-new room is silent, and a silent room has no session -- so it
-    # looks broken from the outside: the room exists and nothing ever happens
-    # in it. Say what it is for, as the bot, so anyone opening it can see it is
-    # live and where it is working.
+    # looks broken from the outside: the room exists and nothing happens in it.
+    # Say what it is for, so anyone opening it sees it is live.
     OPENER="This room is <strong>$(esc "$TITLE")</strong>."
-    [ -n "$CWD" ] && OPENER="$OPENER Working in <code>$(esc "$CWD")</code>."
-    OPENER="$OPENER I answer every message here, no need to tag me."
+    [ -n "$CWD" ]   && OPENER="$OPENER Working in <code>$(esc "$CWD")</code>."
     [ -n "$MODEL" ] && OPENER="$OPENER Running on <code>$(esc "$MODEL")</code>."
-    ROOM_OPENER="$OPENER" rails_runner '
+    OPENER="$OPENER I answer every message here, no need to tag me."
+    rails_runner '
       bot  = User.active_bots.order(:id).first
       room = Room.find(ENV["ROOM_ID"].to_i)
       room.messages.create!(creator: bot, body: ENV["ROOM_OPENER"]) if bot
     ' -e ROOM_ID="$ID" -e ROOM_OPENER="$OPENER" >/dev/null || true
 
+    # Announce the move where the request came from, so the conversation that
+    # asked for this does not simply go quiet.
+    HANDOVER="Starting implementation of <strong>$(esc "$TITLE")</strong>."
+    HANDOVER="$HANDOVER The conversation continues in <a href=\"$URL\">#$(esc "$TITLE")</a>"
+    [ -n "$CWD" ] && HANDOVER="$HANDOVER — its own session, working in <code>$(esc "$CWD")</code>"
+    HANDOVER="$HANDOVER.<br><em>Follow along there; this room stays as it is.</em>"
+    post_here "$HANDOVER"
+
     # With a brief, hand the work over for real: post it as the human who asked
     # and deliver it, which is what starts the session -- in this room, in its
-    # own directory. Without one the room simply waits for someone to type.
+    # own directory, on its own model. Without one the room waits for someone.
     if [ -n "$BRIEF" ]; then
         rails_runner '
           user = User.where.not(role: :bot).order(:id).first
@@ -225,15 +286,35 @@ new)
     fi
 
     echo "room  : $TITLE"
-    echo "url   : $(project_url)/rooms/$ID"
+    echo "url   : $URL"
     echo "claude: answers every message here${CWD:+, running in $CWD}"
     echo "model : ${MODEL:-(bridge default)}"
+    [ -n "${CAMPFIRE_ROOM_PATH:-}" ] && echo "notice: handover posted in the room you were in"
     if [ -n "$BRIEF" ]; then
         echo "brief : posted -- the session for this room has started there"
     else
         echo "note  : nobody has spoken in it yet, so no session is running there."
         echo "        Pass --brief \"...\" to start the work, or say something in the room."
     fi
+    ;;
+
+list)
+    rails_runner '
+      bot_ids = User.active_bots.ids
+      Room.order(:id).each do |r|
+        watched = r.direct? ||
+          r.memberships.where(user_id: bot_ids, involvement: "everything").exists?
+        hidden = r.memberships.where.not(user_id: bot_ids)
+                  .where(involvement: "invisible").exists?
+        name = r.name.presence || (r.direct? ? "(direct)" : "(unnamed)")
+        puts [ r.id, r.type.sub("Rooms::", "").downcase,
+               (hidden ? "archived" : watched ? "watched" : "tag-only"), name ].join("\t")
+      end
+    ' | while IFS=$'\t' read -r id kind mode name; do
+        [ -n "${id:-}" ] || continue
+        printf '%-5s %-7s %-9s %-30s %-8s %s\n' "$id" "$kind" "$mode" "$name" \
+               "$(map_get "$id" model)" "$(map_get "$id" cwd)"
+    done
     ;;
 
 say)
@@ -255,41 +336,38 @@ say)
     esac
     ;;
 
-list)
-    rails_runner '
-      bot_ids = User.active_bots.ids
-      Room.order(:id).each do |r|
-        watched = r.direct? ||
-          r.memberships.where(user_id: bot_ids, involvement: "everything").exists?
-        name = r.name.presence || (r.direct? ? "(direct)" : "(unnamed)")
-        puts [ r.id, r.type.sub("Rooms::", "").downcase,
-               (watched ? "watched" : "tag-only"), name ].join("\t")
-      end
-    ' | while IFS=$'\t' read -r id kind mode name; do
-        [ -n "${id:-}" ] || continue
-        cwd=$(map_get "$id" cwd); model=$(map_get "$id" model)
-        printf '%-5s %-7s %-9s %-30s %-8s %s\n' \
-               "$id" "$kind" "$mode" "$name" "${model:-}" "${cwd:-}"
+set)
+    shift
+    KEY="${1:-}"; shift || true
+    [ -n "$KEY" ] || usage
+    OUT=$(rails_runner "$FIND_ROOM"'puts "OK\t#{room.id}\t#{room.name}"' -e ROOM_KEY="$KEY") || true
+    case "$OUT" in
+        OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}') ;;
+        *) echo "${OUT:-room: the command produced no output}" >&2; exit 1 ;;
+    esac
+    RESTART=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --cwd)     D=$(cd "${2:-}" && pwd); map_set "$ID" cwd "$D"; trust_dir "$D"
+                       echo "  cwd     = $D"; RESTART=1; shift 2 ;;
+            --model)   map_set "$ID" model "${2:-}"; echo "  model   = ${2:-}"; RESTART=1; shift 2 ;;
+            --route)   map_set "$ID" route "${2:-}"; echo "  route   = ${2:-}  (removed on --purge)"; shift 2 ;;
+            --service) map_set "$ID" service "${2:-}"; echo "  service = ${2:-}  (stopped on --purge)"; shift 2 ;;
+            *) echo "room set: unknown option '$1'" >&2; exit 1 ;;
+        esac
     done
+    # cwd and model are read when a session starts, so end the running one.
+    [ "$RESTART" = 1 ] && bridge_close "$ID"
+    echo "recorded for room $ID"
     ;;
 
 watch|unwatch)
     ACTION="$1"; shift
     KEY="${1:-}"; shift || true
-    CWD=""; MODEL=""
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --cwd)   CWD=$(cd "${2:-}" && pwd); shift 2 ;;
-            --model) MODEL="${2:-}"; shift 2 ;;
-            *) shift ;;
-        esac
-    done
     [ -n "$KEY" ] || usage
     INV=$([ "$ACTION" = watch ] && echo everything || echo mentions)
     OUT=$(rails_runner "$FIND_ROOM"'
-      if room.direct?
-        abort "#{room.id} is a direct room -- it always reaches the bot"
-      end
+      abort "#{room.id} is a direct room -- it always reaches the bot" if room.direct?
       bots = User.active_bots.to_a
       absent = bots.reject { |b| room.memberships.exists?(user_id: b.id) }
       room.memberships.grant_to(absent) if absent.any?
@@ -301,42 +379,67 @@ watch|unwatch)
              NAME=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $3}') ;;
         *) echo "${OUT:-room: the command produced no output}" >&2; exit 1 ;;
     esac
-    [ -n "$CWD" ] && { map_set "$ID" cwd "$CWD"; trust_dir "$CWD"; }
-    [ -n "$MODEL" ] && map_set "$ID" model "$MODEL"
-    # The running session was started with the old directory and model, so end
-    # it; the next message picks the new ones up.
-    { [ -n "$CWD" ] || [ -n "$MODEL" ]; } && bridge_close "$ID"
     if [ "$ACTION" = watch ]; then
-        echo "$NAME ($ID): Claude answers every message${CWD:+, running in $CWD}${MODEL:+ on $MODEL}"
+        echo "$NAME ($ID): Claude answers every message"
     else
         echo "$NAME ($ID): Claude only answers when tagged"
     fi
     ;;
 
-close)
+archive)
     shift
-    KEY="${1:-}"; [ -n "$KEY" ] || usage
+    KEY="${1:-}"; shift || true
+    PURGE=0; [ "${1:-}" = "--purge" ] && PURGE=1
+    [ -n "$KEY" ] || usage
+    # Archive, not delete: the conversation that produced a feature is worth
+    # keeping. Campfire has no archive of its own, but a membership marked
+    # `invisible` drops the room out of the sidebar while keeping every message,
+    # and it is reversible -- `room watch <name>` brings it back.
     OUT=$(rails_runner "$FIND_ROOM"'
-      if room.direct?
-        abort "refusing to delete a direct room"
-      end
-      if [ "System", "All Talk", "AppSmoothly" ].include?(room.name)
-        abort "#{room.name.inspect} is a standing room, not a feature room"
-      end
-      id, name = room.id, room.name
-      room.destroy!
-      puts "OK\t#{id}\t#{name}"
+      abort "refusing to archive a direct room" if room.direct?
+      abort "#{room.name.inspect} is a standing room, not a feature room" if '"$STANDING"'.include?(room.name)
+      bot_ids = User.active_bots.ids
+      room.memberships.where(user_id: bot_ids).update_all(involvement: "mentions")
+      room.memberships.where.not(user_id: bot_ids).update_all(involvement: "invisible")
+      puts "OK\t#{room.id}\t#{room.name}\t#{room.messages.count}"
     ' -e ROOM_KEY="$KEY") || true
     case "$OUT" in
         OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}')
-             NAME=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $3}') ;;
+             NAME=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $3}')
+             MSGS=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $4}') ;;
         *) echo "${OUT:-room: the command produced no output}" >&2; exit 1 ;;
     esac
     bridge_close "$ID"
+    [ "$PURGE" = 1 ] && purge_room "$ID"
     map_del "$ID"
-    echo "closed $NAME ($ID); its Claude session is gone"
-    echo "note: anything else the room used -- a worktree, a route file, a"
-    echo "      service -- is yours to clean up. See deploy-previews."
+    echo "archived $NAME ($ID): $MSGS messages kept, hidden from the sidebar"
+    echo "  its Claude session has ended; \"room watch \\\"$NAME\\\"\" brings it back"
+    [ "$PURGE" = 1 ] || echo "  nothing else was touched -- add --purge to tear down what it owned"
+    ;;
+
+close)
+    shift
+    KEY="${1:-}"; shift || true
+    PURGE=0; [ "${1:-}" = "--purge" ] && PURGE=1
+    [ -n "$KEY" ] || usage
+    OUT=$(rails_runner "$FIND_ROOM"'
+      abort "refusing to delete a direct room" if room.direct?
+      abort "#{room.name.inspect} is a standing room, not a feature room" if '"$STANDING"'.include?(room.name)
+      id, name, count = room.id, room.name, room.messages.count
+      room.destroy!
+      puts "OK\t#{id}\t#{name}\t#{count}"
+    ' -e ROOM_KEY="$KEY") || true
+    case "$OUT" in
+        OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}')
+             NAME=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $3}')
+             MSGS=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $4}') ;;
+        *) echo "${OUT:-room: the command produced no output}" >&2; exit 1 ;;
+    esac
+    bridge_close "$ID"
+    [ "$PURGE" = 1 ] && purge_room "$ID"
+    map_del "$ID"
+    echo "deleted $NAME ($ID) and its $MSGS messages; the session is gone"
+    [ "$PURGE" = 1 ] || echo "  nothing else was touched -- add --purge to tear down what it owned"
     ;;
 
 -h|--help|help|"") usage 0 ;;
