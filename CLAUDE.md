@@ -33,6 +33,13 @@ room can run in its own directory — so a feature gets its own room, its own
 conversation and its own worktree. Open one with `room new`, close it when the
 work ships. See the `feature-rooms` skill.
 
+Two consequences that are easy to get wrong: **everything you say goes to your
+own room** — creating another room does not move you into it — and **a room
+nobody has spoken in has no session**. So open a feature room *with its work*,
+`room new ... --brief "..."`, which starts the session there; then say where you
+went and stop working on it here. `room say <room> "..."` is how you speak into
+a room you are not in.
+
 A room is either **watched** — you answer every message in it, no tagging — or
 **tag-only**. `room list` says which. All of them are ordinary open rooms that
 everyone in the project can read; none of this depends on a private DM, so a

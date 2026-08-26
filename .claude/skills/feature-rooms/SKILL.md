@@ -12,9 +12,32 @@ so two features can work on the same repo without fighting over one checkout.
 That makes a room the natural unit of work: open one when a feature starts,
 close it when the feature ships.
 
+## The thing to understand first
+
+**You are one session, and it belongs to one room.** Everything you say goes to
+*your* room. Creating another room does not move you into it, and you will not
+see what is said there.
+
+**A room with nothing in it has no session at all.** The session starts when
+someone speaks. So `room new` on its own produces a room that sits empty and
+looks broken — the work carries on in the room you were already in, which is
+exactly what you did not want.
+
+So when you open a feature room, **hand the work over in the same breath**:
+
+    room new "Search rewrite" \
+      --cwd /home/appsmoothly/projects/myapp-search \
+      --brief "Rewrite search to use a GIN index. Start by reading db/schema.rb
+               and app/models/concerns/searchable.rb, then propose an approach."
+
+`--brief` posts that message into the new room and starts its session there, in
+its own directory. Then say one line where you are — "→ opened #Search rewrite,
+continuing there: <url>" — and **stop working on it here**. Two sessions doing
+the same job is worse than one.
+
 ## Open one
 
-    room new "Search rewrite" --cwd /home/appsmoothly/projects/myapp-search
+    room new "Search rewrite" --cwd DIR --brief "what to do"
 
 Prints the room's URL. It is an **open room** — everyone in the project can read
 it, which is the point — and Claude answers every message in it without being
@@ -24,10 +47,18 @@ The typical shape, for a project with worktrees:
 
     cd /home/appsmoothly/projects/myapp
     git worktree add ../myapp-search -b search-rewrite
-    room new "Search rewrite" --cwd /home/appsmoothly/projects/myapp-search
+    room new "Search rewrite" --cwd /home/appsmoothly/projects/myapp-search \
+      --brief "..."
 
 Check the project's own `CLAUDE.md` first — how a project wants worktrees,
 branches and ports set up is project-specific and lives there, not here.
+
+## Speaking into a room you are not in
+
+    room say "All Talk" "Search rewrite is merged; closing that room."
+
+Use it to report back when a feature is done, or to hand something over. It is
+the only way to say anything outside your own room.
 
 ## Give it a URL
 
@@ -55,10 +86,11 @@ genuinely finished; say so in the room first.
 ## The rest of the commands
 
     room list                    every room: watched or tag-only, and its directory
+    room say <room> "text"       post into a room you are not in
     room watch "All Talk"        answer everything here, no tagging
     room unwatch "All Talk"      back to tag-only
 
-`room close` refuses to touch **All Talk**, **System**, **AppSmoothly** and any
+`room close` refuses to touch **AppSmoothly**, **All Talk**, **System** and any
 direct room. Those are standing rooms, not feature rooms.
 
 ## How it works, briefly
