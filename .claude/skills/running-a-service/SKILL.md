@@ -18,6 +18,35 @@ description: Run an app or service inside a project VM so it is reachable from o
 Caddy owns `:80` and routes by hostname. Everything behind it stays on
 loopback, so you cannot accidentally expose a service by binding it.
 
+
+## Rails in development: the Host header will 403 you
+
+A Rails app in `development` blocks unknown `Host` headers, and every request
+reaches you as `app.<project>.appsmoothly.com` from the router. So the app works
+on `127.0.0.1:3000` and returns **403 Blocked hosts** through Caddy — which
+looks like a routing bug and is not one.
+
+Allow the project's own domain in the unit:
+
+    Environment=RAILS_DEVELOPMENT_HOSTS=.<project>.appsmoothly.com
+
+**The leading dot allows exactly one extra label.** `.appsmoothly.com` compiles
+to `/\A([a-z0-9-]+\.)?appsmoothly\.com\z/`, which matches
+`<project>.appsmoothly.com` but *not* `app.<project>.appsmoothly.com` — so the
+obvious-looking value silently 403s every app request. Use the **project**
+domain and both `app.` and every preview hostname work.
+
+Check the allowlist rather than guessing at it:
+
+    RAILS_ENV=development RAILS_DEVELOPMENT_HOSTS=.<project>.appsmoothly.com \
+      bin/rails runner 'p ActionDispatch::HostAuthorization::Permissions
+        .new(Rails.application.config.hosts)
+        .allows?("app.<project>.appsmoothly.com")'
+
+Running in `production` instead avoids this entirely, but needs
+`config/master.key` — which is gitignored, so it is not in a fresh checkout.
+Ask for it with `ask-secret RAILS_MASTER_KEY` rather than through chat.
+
 ## Bind to 127.0.0.1
 
     rails s -b 127.0.0.1 -p 3000

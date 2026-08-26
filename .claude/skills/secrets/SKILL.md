@@ -33,6 +33,24 @@ scrollback, which keeps it out of anything you later paste back into chat.
 not hiding it from you. Do not print one into chat, do not commit one, and do
 not echo one in a command whose output you will summarise.
 
+## GitHub is already wired up
+
+`GITHUB_TOKEN` is the one name with plumbing behind it. Ask for it the usual
+way and git starts working — no further setup:
+
+    ask-secret GITHUB_TOKEN "to fetch and push the project repo"
+
+A credential helper reads `~/.secrets/GITHUB_TOKEN` for `https://github.com`
+and nothing else. With no token stored it does nothing, so a VM without one
+behaves exactly as before. Check it took:
+
+    git -C projects/<repo> ls-remote origin >/dev/null && echo ok
+
+Prefer a **fine-grained token limited to the one repo** this VM works on. A
+whole-account token in here is worth avoiding: this box runs an agent with
+permissions off, so the blast radius of the token is the blast radius of the
+box.
+
 ## Putting it somewhere permanent
 
 `~/.secrets/` is a landing pad, not storage. Move the value where it belongs:

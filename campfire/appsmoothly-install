@@ -41,9 +41,15 @@ put 755 "$SRC/vapid-gen.py" /opt/claude-bot/vapid-gen.py || true
 put 644 "$SRC/avatar.png"   /opt/claude-bot/avatar.png   || true
 
 echo "==> commands"
-for f in notify ask-secret secret room; do
+for f in notify ask-secret secret room git-credential-appsmoothly; do
     put 755 "$SRC/$f" "/usr/local/bin/$f" || true
 done
+# Wire the helper in for the agent's user. Harmless when no token is stored --
+# the helper exits silently -- so this is safe on every VM, not just ones with
+# a repo to push to.
+if [ -x /usr/local/bin/git-credential-appsmoothly ]; then
+    sudo -u lukas git config --global credential.https://github.com.helper appsmoothly 2>/dev/null || true
+fi
 # Not on PATH: `history` is a shell builtin, so a command by that name would
 # never be reached anyway.
 put 755 "$SRC/history" /opt/claude-bot/history || true
