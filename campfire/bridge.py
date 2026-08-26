@@ -20,10 +20,13 @@ Config comes from environment variables (see config.env):
   LISTEN_PORT
   CAMPFIRE_BASE   where to POST replies (kamal-proxy on localhost)
   CLAUDE_BIN      absolute path to the claude CLI
-  CLAUDE_MODEL    model for the chat session (default sonnet)
+  CLAUDE_MODEL    default model for a room that does not pick one (sonnet:
+                  most chat is questions). A feature room overrides it -- see
+                  room_model() -- because a room exists in order to do work.
   WORKDIR         directory claude runs in
   SESSIONS_FILE   JSON file mapping room id -> claude session id
-  ROOMS_FILE      JSON file mapping room id -> {"cwd": ...}, written by `room`
+  ROOMS_FILE      JSON file mapping room id -> {"cwd": ..., "model": ...},
+                  written by `room`
 """
 
 import html
@@ -124,6 +127,16 @@ def room_conf(room_id):
         return {}
 
 
+def room_model(room_id):
+    """Which model this room's session runs on.
+
+    Chat defaults to a fast model, but a feature room is the implementation
+    phase and gets a stronger one, chosen when the room is created. Per-room
+    rather than global, so asking a question stays cheap.
+    """
+    return room_conf(room_id).get("model") or CLAUDE_MODEL
+
+
 def room_workdir(room_id):
     """Where this room's session runs.
 
@@ -149,12 +162,14 @@ class Session:
         return self.proc is not None and self.proc.poll() is None
 
     def start(self):
+        model = room_model(self.room_id)
         cmd = [
             CLAUDE_BIN, "-p", "--verbose",
-            # Chat is mostly questions, so the conversation runs on a fast
-            # model. Heavy work is delegated to a subagent pinned to a stronger
-            # one (see .claude/agents/), rather than upgrading every message.
-            "--model", CLAUDE_MODEL,
+            # Chat is mostly questions, so a plain conversation runs on a fast
+            # model; a feature room asks for a stronger one when it is created.
+            # Heavier still can be delegated to a subagent pinned to its own
+            # model (see .claude/agents/).
+            "--model", model,
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             # Subagent output reaches the room too, so dispatching work is
@@ -181,7 +196,7 @@ class Session:
             return False
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._drain_stderr, daemon=True).start()
-        log(f"room {self.room_id}: session started in {cwd}"
+        log(f"room {self.room_id}: session started in {cwd} on {model}"
             f"{' (resumed)' if resume else ''}")
         return True
 

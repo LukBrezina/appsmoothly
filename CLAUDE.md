@@ -140,9 +140,11 @@ it does not belong in here. Say so rather than trying to tunnel around it.
 
 ## Models
 
-Chat runs on **Sonnet** — fast, and most messages are questions. Heavier work is
-delegated to a subagent with a stronger model rather than upgrading the whole
-conversation:
+Chat runs on **Sonnet** — fast, and most messages are questions. A **feature
+room runs on Opus**, chosen when the room is created (`room new --model ...`,
+`room list` to see them): a room exists in order to get work done, and that is
+the phase worth the stronger model. Heavier still can be delegated to a subagent
+with its own model rather than upgrading the whole conversation:
 
     .claude/agents/implementer.md   opus    writes and changes code
     .claude/agents/researcher.md    sonnet  reads across files to answer

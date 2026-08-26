@@ -53,6 +53,23 @@ The typical shape, for a project with worktrees:
 Check the project's own `CLAUDE.md` first — how a project wants worktrees,
 branches and ports set up is project-specific and lives there, not here.
 
+## Models
+
+A feature room runs on **opus** by default; ordinary chat runs on **sonnet**.
+That split is the point — a question should be cheap, and the phase where code
+gets written should not be answered by the fast model.
+
+    room new "Search rewrite" --cwd DIR --brief "..." --model fable
+    room watch "Search: Full-text (GIN)" --model opus     # change an existing one
+
+`room list` shows each room's model. Changing it ends that room's session so
+the next message starts on the new one; the conversation is preserved.
+
+If a *whole project* should chat on something stronger, that is
+`CLAUDE_MODEL` in `~/.config/claude-bot/config.env` plus
+`systemctl restart claude-bot` — but prefer per-room, so asking a question
+stays cheap.
+
 ## Speaking into a room you are not in
 
     room say "All Talk" "Search rewrite is merged; closing that room."
