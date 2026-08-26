@@ -58,7 +58,7 @@ genuinely finished; say so in the room first.
     room watch "All Talk"        answer everything here, no tagging
     room unwatch "All Talk"      back to tag-only
 
-`room close` refuses to touch **AppSmoothly**, **All Talk**, **System** and any
+`room close` refuses to touch **All Talk**, **System**, **AppSmoothly** and any
 direct room. Those are standing rooms, not feature rooms.
 
 ## How it works, briefly

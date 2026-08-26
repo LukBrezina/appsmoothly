@@ -40,9 +40,12 @@ put 755 "$SRC/vapid-gen.py" /opt/claude-bot/vapid-gen.py || true
 put 644 "$SRC/avatar.png"   /opt/claude-bot/avatar.png   || true
 
 echo "==> commands"
-for f in notify ask-secret secret room history; do
+for f in notify ask-secret secret room; do
     put 755 "$SRC/$f" "/usr/local/bin/$f" || true
 done
+# Not on PATH: `history` is a shell builtin, so a command by that name would
+# never be reached anyway.
+put 755 "$SRC/history" /opt/claude-bot/history || true
 for f in appsmoothly-update appsmoothly-install campfire-init campfire-bot-init \
          campfire-update vm-bootstrap; do
     put 755 "$SRC/$f" "/usr/local/sbin/$f" || true
@@ -96,7 +99,20 @@ fi
 if [ "$rails_changed" = 1 ]; then
     # A rebuild is minutes, so it only happens when an initializer really moved.
     echo "  campfire initializers changed -- rebuilding the image"
-    /usr/local/sbin/campfire-update --force || echo "  WARNING: rebuild failed" >&2
+    if ! LOG=$(/usr/local/sbin/campfire-update --force 2>&1); then
+        echo "$LOG" | tail -20 >&2
+        # The old image keeps running, so nothing is broken -- but the change is
+        # not live and this runs on a timer, where stderr goes nowhere anyone
+        # looks. Say so in chat, the same way a failed repo update does.
+        printf '%s\n' \
+          "**Campfire did not rebuild.** The initializers in \`campfire/initializers/\`" \
+          "changed, so the running image is behind the repo. It is still serving the" \
+          "previous build, so chat works -- but whatever the new initializer does is" \
+          "not in effect." "" "Last 20 lines:" '```' "$(echo "$LOG" | tail -20)" '```' "" \
+          "Claude -- work out why and fix it. \`sudo /usr/local/sbin/campfire-update --force\`" \
+          "rebuilds; the source is \`projects/once-campfire\`." \
+        | /usr/local/bin/notify --ask || echo "  (could not reach chat either)" >&2
+    fi
 fi
 
 [ "$bridge_changed$units_changed$caddy_changed$rails_changed" = "0000" ] &&

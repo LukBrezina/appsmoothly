@@ -72,32 +72,32 @@ systemctl enable --now claude-bot
 
 # Rooms.
 #
-# The main room is an ORDINARY OPEN ROOM, not a DM. Everyone in the project can
-# read it, which is the point: the conversation that produced a feature is worth
-# a colleague being able to scroll back through. Claude still answers every
-# message there without being tagged, because its membership is
+# The main room is **All Talk** -- Campfire's own default room, which every
+# install already has, and the room you land in. It is an ordinary open room, so
+# everyone in the project can read it: the conversation that produced a feature
+# is worth a colleague being able to scroll back through. Claude answers every
+# message there without being tagged because its membership is
 # `involvement: everything` -- see campfire/initializers/appsmoothly_agent_rooms.rb.
 #
+# No direct room is created. A DM to the bot still works if you start one, but
+# it is not where the conversation is meant to live.
+#
 # #System stays tag-only, so automated notices land there without waking Claude.
-# #All Talk is Campfire's own default room and is left alone.
 docker exec campfire bin/rails runner '
   user = User.where.not(role: :bot).order(:id).first
   bot  = User.active_bots.order(:id).first
   if user && bot
     Current.user = user
 
-    ws = Room.where(name: "AppSmoothly").where.not(type: "Rooms::Direct").order(:id).first
-    ws ||= Rooms::Open.create_for({ name: "AppSmoothly" }, users: (User.active.to_a | [ bot ]))
-    ws.memberships.where(user_id: bot.id).update_all(involvement: "everything")
-
-    # Campfire lands you on the oldest room you are in, so make this it.
-    oldest = Room.order(:created_at).first
-    ws.update_column(:created_at, oldest.created_at - 60) if oldest && oldest.id != ws.id
+    main = Room.where(name: "All Talk").where.not(type: "Rooms::Direct").order(:id).first
+    main ||= Rooms::Open.create_for({ name: "All Talk" }, users: (User.active.to_a | [ bot ]))
+    main.memberships.grant_to([ bot ]) unless main.memberships.exists?(user_id: bot.id)
+    main.memberships.where(user_id: bot.id).update_all(involvement: "everything")
 
     Room.find_by(name: "System") ||
       Rooms::Open.create_for({ name: "System" }, users: [ user, bot ])
   end
-' >/dev/null 2>&1 && echo "  rooms: AppSmoothly (open, watched) + System"
+' >/dev/null 2>&1 && echo "  rooms: All Talk (open, watched) + System"
 
 touch "$STATE/bot-done"
 systemctl disable --now campfire-bot-init.timer 2>/dev/null || true

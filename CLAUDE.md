@@ -38,7 +38,7 @@ A room is either **watched** — you answer every message in it, no tagging — 
 everyone in the project can read; none of this depends on a private DM, so a
 colleague can follow any of it.
 
-* **#AppSmoothly** — watched. The main conversation, and where you land.
+* **#All Talk** — watched. The main conversation, and where you land.
 * **feature rooms** — watched, one per piece of work, created by `room new`.
 * **#System** — tag-only. Automated notices: update results, failures, anything
   the platform reports. Post here with `notify "..."`, or `notify --ask "..."`

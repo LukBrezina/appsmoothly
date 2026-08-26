@@ -25,9 +25,11 @@ dexec() {
     else sudo -n docker exec "$@"; fi
 }
 
-# Run Ruby inside the Campfire container. Values are passed through the
-# environment, never interpolated into the script -- a room title is arbitrary
-# text and would otherwise be a quoting bug waiting to happen.
+# Run Ruby inside the Campfire container. Values reach the script as explicit
+# `-e NAME=value` arguments, never interpolated into the Ruby -- a room title is
+# arbitrary text and would otherwise be a quoting bug waiting to happen. The
+# value has to be spelled out rather than inherited (`-e NAME`), because the
+# sudo fallback resets the environment and the inherited form would be empty.
 rails_runner() {
     local script="$1"; shift
     dexec "$@" campfire bin/rails runner "$script" 2>&1 | tr -d '\r'
@@ -104,7 +106,7 @@ new)
     [ -n "$TITLE" ] || usage
     [ -z "$CWD" ] || CWD=$(cd "$CWD" && pwd)   # fail loudly if it does not exist
 
-    OUT=$(ROOM_TITLE="$TITLE" rails_runner '
+    OUT=$(rails_runner '
       title = ENV["ROOM_TITLE"]
       user = User.where.not(role: :bot).order(:id).first
       abort "no human user yet -- finish Campfire first-run" unless user
@@ -123,7 +125,7 @@ new)
       # `everything` is what makes Claude answer without being tagged.
       room.memberships.where(user_id: bots.map(&:id)).update_all(involvement: "everything")
       puts "OK\t#{room.id}"
-    ' -e ROOM_TITLE)
+    ' -e ROOM_TITLE="$TITLE")
     case "$OUT" in
         OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}') ;;
         *) echo "$OUT" >&2; exit 1 ;;
@@ -159,7 +161,7 @@ watch|unwatch)
     [ "${1:-}" = "--cwd" ] && { CWD=$(cd "${2:-}" && pwd); shift 2; }
     [ -n "$KEY" ] || usage
     INV=$([ "$ACTION" = watch ] && echo everything || echo mentions)
-    OUT=$(ROOM_KEY="$KEY" ROOM_INV="$INV" rails_runner "$FIND_ROOM"'
+    OUT=$(rails_runner "$FIND_ROOM"'
       if room.direct?
         abort "#{room.id} is a direct room -- it always reaches the bot"
       end
@@ -168,7 +170,7 @@ watch|unwatch)
       room.memberships.grant_to(absent) if absent.any?
       room.memberships.where(user_id: bots.map(&:id)).update_all(involvement: ENV["ROOM_INV"])
       puts "OK\t#{room.id}\t#{room.name}"
-    ' -e ROOM_KEY -e ROOM_INV)
+    ' -e ROOM_KEY="$KEY" -e ROOM_INV="$INV")
     case "$OUT" in
         OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}')
              NAME=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $3}') ;;
@@ -185,7 +187,7 @@ watch|unwatch)
 close)
     shift
     KEY="${1:-}"; [ -n "$KEY" ] || usage
-    OUT=$(ROOM_KEY="$KEY" rails_runner "$FIND_ROOM"'
+    OUT=$(rails_runner "$FIND_ROOM"'
       if room.direct?
         abort "refusing to delete a direct room"
       end
@@ -195,7 +197,7 @@ close)
       id, name = room.id, room.name
       room.destroy!
       puts "OK\t#{id}\t#{name}"
-    ' -e ROOM_KEY)
+    ' -e ROOM_KEY="$KEY")
     case "$OUT" in
         OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}')
              NAME=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $3}') ;;
