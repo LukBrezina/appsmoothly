@@ -22,7 +22,7 @@ SRC="$REPO/campfire"
 CAMPFIRE_SRC="$REPO/projects/once-campfire"
 [ -d "$SRC" ] || { echo "appsmoothly-install: no $SRC yet"; exit 0; }
 
-bridge_changed=0; units_changed=0; caddy_changed=0; rails_changed=0
+bridge_changed=0; units_changed=0; caddy_changed=0; rails_changed=0; any_changed=0
 
 put() {  # <mode> <src> <dst>   -> 0 if it changed
     local mode="$1" src="$2" dst="$3"
@@ -30,6 +30,7 @@ put() {  # <mode> <src> <dst>   -> 0 if it changed
     if cmp -s "$src" "$dst" 2>/dev/null; then return 1; fi
     install -D -m "$mode" -o root -g root "$src" "$dst"
     echo "  $dst"
+    any_changed=1
     return 0
 }
 
@@ -115,6 +116,5 @@ if [ "$rails_changed" = 1 ]; then
     fi
 fi
 
-[ "$bridge_changed$units_changed$caddy_changed$rails_changed" = "0000" ] &&
-    echo "  nothing to do"
+[ "$any_changed" = 0 ] && echo "  nothing to do"
 exit 0

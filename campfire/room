@@ -30,6 +30,9 @@ dexec() {
 # arbitrary text and would otherwise be a quoting bug waiting to happen. The
 # value has to be spelled out rather than inherited (`-e NAME`), because the
 # sudo fallback resets the environment and the inherited form would be empty.
+# Callers append `|| true` to the command substitution: `set -e` with
+# `pipefail` would otherwise kill the script on a failed run, before the case
+# that reports *why* it failed -- which is the whole point of capturing it.
 rails_runner() {
     local script="$1"; shift
     dexec "$@" campfire bin/rails runner "$script" 2>&1 | tr -d '\r'
@@ -125,10 +128,10 @@ new)
       # `everything` is what makes Claude answer without being tagged.
       room.memberships.where(user_id: bots.map(&:id)).update_all(involvement: "everything")
       puts "OK\t#{room.id}"
-    ' -e ROOM_TITLE="$TITLE")
+    ' -e ROOM_TITLE="$TITLE") || true
     case "$OUT" in
         OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}') ;;
-        *) echo "$OUT" >&2; exit 1 ;;
+        *) echo "${OUT:-room: the command produced no output}" >&2; exit 1 ;;
     esac
     [ -n "$CWD" ] && map_set "$ID" "$CWD"
     bridge_close "$ID"     # start clean if the id was ever used before
@@ -170,11 +173,11 @@ watch|unwatch)
       room.memberships.grant_to(absent) if absent.any?
       room.memberships.where(user_id: bots.map(&:id)).update_all(involvement: ENV["ROOM_INV"])
       puts "OK\t#{room.id}\t#{room.name}"
-    ' -e ROOM_KEY="$KEY" -e ROOM_INV="$INV")
+    ' -e ROOM_KEY="$KEY" -e ROOM_INV="$INV") || true
     case "$OUT" in
         OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}')
              NAME=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $3}') ;;
-        *) echo "$OUT" >&2; exit 1 ;;
+        *) echo "${OUT:-room: the command produced no output}" >&2; exit 1 ;;
     esac
     [ -n "$CWD" ] && map_set "$ID" "$CWD"
     if [ "$ACTION" = watch ]; then
@@ -197,11 +200,11 @@ close)
       id, name = room.id, room.name
       room.destroy!
       puts "OK\t#{id}\t#{name}"
-    ' -e ROOM_KEY="$KEY")
+    ' -e ROOM_KEY="$KEY") || true
     case "$OUT" in
         OK*) ID=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $2}')
              NAME=$(printf '%s' "$OUT" | awk -F'\t' '/^OK/{print $3}') ;;
-        *) echo "$OUT" >&2; exit 1 ;;
+        *) echo "${OUT:-room: the command produced no output}" >&2; exit 1 ;;
     esac
     bridge_close "$ID"
     map_del "$ID"
