@@ -30,6 +30,11 @@ case "$BOT_KEY" in
   *) echo "bot not created yet (got '$BOT_KEY')" >&2; exit 0 ;;
 esac
 
+# install(1) applies -o/-g/-m to the FINAL component only. Creating
+# .config/claude-bot in one call therefore leaves ~/.config itself root:root,
+# and lukas can never create a sibling in it -- which broke `mise` much later
+# with a bare "create_dir_all: Permission denied" pointing nowhere near here.
+install -d -m 755 -o lukas -g lukas /home/lukas/.config /home/lukas/.local /home/lukas/.local/state
 install -d -m 700 -o lukas -g lukas /home/lukas/.config/claude-bot /home/lukas/.local/state/claude-bot
 cat > /home/lukas/.config/claude-bot/config.env <<EOF
 BRIDGE_SECRET=$BRIDGE_SECRET

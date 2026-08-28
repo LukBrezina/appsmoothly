@@ -62,6 +62,29 @@ colleague can follow any of it.
 A direct message to the bot also reaches you, always — Campfire delivers every
 message in a direct room. Use it the same way; it is just not public.
 
+## Toolchains: use mise
+
+`mise` is installed and is how this box gets Ruby, Node and Python. **Do not
+install rbenv, rvm, nvm, asdf or pyenv** — one agent already spent ten minutes
+compiling Ruby from source on a box where mise would have taken thirty seconds.
+
+    cd <the repo>
+    mise install          # reads .ruby-version / .node-version / mise.toml
+    ruby -v               # already on PATH, via ~/.local/share/mise/shims
+
+mise pulls a prebuilt Ruby and verifies its GitHub artifact attestation, so no
+build dependencies are needed and nothing is compiled.
+
+`.ruby-version` is honoured here because `idiomatic_version_file_enable_tools`
+has been set. If `mise current` prints nothing in a repo that clearly pins a
+version, that setting is missing rather than the file being wrong.
+
+**A systemd unit inherits none of the shell's PATH**, so plain `bundle` in
+`ExecStart=` will not resolve. Either go through a login shell —
+`ExecStart=/usr/bin/env bash -lc 'bin/rails s ...'`, which picks the shims up
+from `/etc/profile.d/mise-shims.sh` — or name the shim absolutely,
+`/home/lukas/.local/share/mise/shims/bundle`. See the `running-a-service` skill.
+
 ## URLs
 
     https://<project>.appsmoothly.com          -> Campfire (port 80)
