@@ -7,8 +7,21 @@ STATE=/var/lib/campfire-init
 [ -f "$STATE/bot-done" ] && exit 0
 curl -sf -o /dev/null http://127.0.0.1:8080/up 2>/dev/null || exit 0
 
+# Ask the RUNNING server whether first-run is done; do not boot a second Rails
+# to find out. `bin/rails runner 'Account.any?'` takes ~21s and most of a core,
+# and this timer fires every 30s -- so a VM sitting unconfigured burned ~70% of
+# a core indefinitely, stealing it from whichever VM someone was actually
+# working in. Two idle boxes cost about 1.4 cores of an 8-core host that way.
+#
+# /first_run serves the signup form (200) until an account exists and redirects
+# (302) once one does. That is a few milliseconds against an already-warm server.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:8080/first_run 2>/dev/null || echo 000)
+[ "$CODE" = "302" ] || exit 0   # 200 = still waiting for a human; 000 = not answering
+
+# Now confirm authoritatively -- but once, on the way to creating the bot,
+# instead of every thirty seconds forever.
 if ! docker exec campfire bin/rails runner 'exit(Account.any? ? 0 : 1)' 2>/dev/null; then
-    exit 0   # nobody has set Campfire up yet; try again next tick
+    exit 0
 fi
 
 BRIDGE_SECRET=$(cat "$STATE/bridge-secret")
