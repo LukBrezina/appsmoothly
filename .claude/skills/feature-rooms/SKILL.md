@@ -11,6 +11,13 @@ conversation, different context, and its **own working directory and model**.
 That makes a room the natural unit of work: open one when a feature starts,
 archive it when the feature ships.
 
+**In a factory cell, prefer a run over a worktree.** If this VM has the
+factory set up (`run list` answers), give the feature its own *container*
+instead of a worktree: `run new <name>`, then `room new ... --run <name>` —
+no `--cwd`, no worktree to create or clean up, and the app runs isolated
+inside the run with its own preview URL. See the `factory` skill. Worktrees
+remain the way on VMs without the factory.
+
 ## The thing to understand first
 
 **You are one session, and it belongs to one room.** Everything you say goes to
