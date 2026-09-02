@@ -163,6 +163,32 @@ data["bypassPermissionsModeAccepted"] = True
 json.dump(data, open(path + ".tmp", "w"), indent=2)
 os.replace(path + ".tmp", path)
 PY' || true
+    # The app must be supervised or it dies with the shell that started it --
+    # and a woken run then serves 502 forever (the wake page loops). A
+    # generic unit, disabled by default; the agent enables it and, when the
+    # repo starts differently, overrides ExecStart.
+    incus exec base-builder -- bash -c '
+        cat > /etc/systemd/system/app.service <<"EOF"
+[Unit]
+Description=the project app (factory run)
+After=network.target postgresql.service
+
+[Service]
+User=dev
+WorkingDirectory=/home/dev/app
+Environment=HOME=/home/dev
+# bash -lc so mise shims resolve; override this line if the repo starts
+# its dev server differently (bin/dev, foreman, ...).
+ExecStart=/usr/bin/env bash -lc "exec bin/rails server -b 127.0.0.1 -p 3000"
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload
+    '
+
     # The agent that later runs inside a run needs to know WHERE it is, or it
     # reinstalls toolchains that exist and builds worktrees it does not need
     # -- exactly what the first live run did. ~/.claude/CLAUDE.md is user-
@@ -184,6 +210,10 @@ installed. Messages reach you from the project'"'"'s chat; keep replies short
 - Serve the app on 127.0.0.1:3000; that port is already wired to this
   run'"'"'s public preview URL -- the exact address is in \$PREVIEW_URL
   (bash -lc "echo \$PREVIEW_URL" if your shell does not have it).
+- Keep the app alive with `sudo systemctl enable --now app` -- NEVER as a
+  foreground process of your own shell, which dies with your turn. The
+  unit survives this container'"'"'s sleep/wake; if the repo starts its
+  server differently, edit /etc/systemd/system/app.service first.
 - Commit and push as you go (the GitHub token is wired via the credential
   helper); open a PR when the work is ready.
 - sudo works and the container is disposable: be bold in here, careful in
