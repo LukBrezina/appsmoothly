@@ -57,6 +57,32 @@ push_github_token() {
         --mode 0600 --uid 1000 --gid 1000 --quiet
 }
 
+# Files the app needs in its checkout but that never enter git -- Rails
+# config/master.key is the canonical case. Convention: a file at
+# ~/.secrets/app-files/<path> lands in the template at /home/dev/app/<path>,
+# so every run is born preconfigured and nothing has to be pasted per run.
+# Returns 0 when something actually changed, so the caller knows to rerun
+# the repo's setup.
+APP_FILES=/home/lukas/.secrets/app-files
+inject_app_files() {
+    local changed=1 rel tmp
+    [ -d "$APP_FILES" ] || return 1
+    while IFS= read -r -d '' f; do
+        rel="${f#"$APP_FILES"/}"
+        tmp=$(mktemp)
+        if incus file pull "template/home/dev/app/$rel" "$tmp" >/dev/null 2>&1 &&
+           cmp -s "$tmp" "$f"; then
+            rm -f "$tmp"; continue
+        fi
+        rm -f "$tmp"
+        incus file push "$f" "template/home/dev/app/$rel" --create-dirs \
+            --uid 1000 --gid 1000 --mode 0600 --quiet
+        echo "  injected $rel"
+        changed=0
+    done < <(find "$APP_FILES" -type f -print0)
+    return $changed
+}
+
 # ---------------------------------------------------------------- refresh ---
 if incus info template >/dev/null 2>&1; then
     WAS_RUNNING=$(incus list template --format csv -c s)
@@ -74,12 +100,13 @@ if incus info template >/dev/null 2>&1; then
         exit 1
     fi
     AFTER=$(in_app "git rev-parse HEAD" | tr -d '\r')
-    if [ "$HEAD" = "$AFTER" ]; then
+    FILES=1; inject_app_files && FILES=0
+    if [ "$HEAD" = "$AFTER" ] && [ "$FILES" = 1 ]; then
         [ "$WAS_RUNNING" = "RUNNING" ] || incus stop template
         exit 0
     fi
 
-    echo "template: ${HEAD:0:7} -> ${AFTER:0:7}"
+    echo "template: ${HEAD:0:7} -> ${AFTER:0:7}$([ "$FILES" = 0 ] && echo ' + app files')"
     {
         in_app "mise install --quiet" &&
         in_app "[ -x bin/setup ] && bin/setup || true"
@@ -194,6 +221,8 @@ as_dev -- git clone "$URL" /home/dev/app || {
     echo "clone failed -- is a GITHUB_TOKEN needed? (ask-secret GITHUB_TOKEN ...)" >&2
     exit 1
 }
+
+inject_app_files || true
 
 echo "==> toolchain + deps (this is the slow part, once)"
 in_app "mise install" || echo "  WARN: mise install had errors" >&2

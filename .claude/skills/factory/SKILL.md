@@ -53,6 +53,22 @@ behave on real data", load a dump *inside the run* with the app's own tools
 `ask-secret` or have the human place one — do not reach for production from
 in here; this VM cannot and should not.
 
+## Preconfigured runs: secret files the app needs
+
+Some files must exist in the checkout but never enter git — Rails
+`config/master.key` is the classic. Put them under `~/.secrets/app-files/`
+mirroring their repo path:
+
+    ask-secret RAILS_MASTER_KEY "to boot the app in runs"
+    install -d -m 700 ~/.secrets/app-files/config
+    secret RAILS_MASTER_KEY | tr -d '\n' > ~/.secrets/app-files/config/master.key
+
+`template-build` injects everything under `app-files/` into the template on
+every build and refresh (and reruns `bin/setup` when a file changed), so every
+run is born with them — nothing is pasted per run, and the files live only in
+this cell. Works for any path: `.env`, `config/credentials/*.key`, a service
+account JSON.
+
 ## Managing the template
 
     sudo template-build https://github.com/OWNER/REPO.git   # once, when the cell is born
