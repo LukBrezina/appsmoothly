@@ -486,6 +486,19 @@ class Handler(BaseHTTPRequestHandler):
                            f"It is not in this conversation.")
             except Exception as e:
                 log(f"could not confirm in chat: {e}")
+            # Wake the session that asked. The confirmation above is posted AS
+            # the bot, and bots get no webhooks for their own messages -- so
+            # without this the agent that ran ask-secret sits idle until a
+            # human nudges it, which defeats "paste the link and walk away".
+            m_room = re.search(r"/rooms/(\d+)/", req.get("room_path") or "")
+            if m_room:
+                rid = int(m_room.group(1))
+                s = session_for(rid, req["room_path"])
+                threading.Thread(
+                    target=s.send,
+                    args=(f"[system] The secret {req['name']} was just submitted and is "
+                          f"readable at ~/.secrets/{req['name']}. Carry on.",),
+                    daemon=True).start()
             self._html(200, _page("Saved", f"Stored as <code>{html.escape(path)}</code>. "
                                            "You can close this tab."))
             return
