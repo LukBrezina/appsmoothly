@@ -85,18 +85,11 @@ to chat for you to look at. Fix main, or fix the template by hand:
 
 ## Cell onboarding — a fresh VM's first job
 
-When the first message in All Talk is a setup brief naming a repo, this cell
-is brand new and you are the one who makes it real.
-
-**If the cell was created without a repo**, your welcome message asked the
-human for a repository URL instead. When they paste one, record it and then
-run the same dance below:
-
-    printf '%s\n' <the-url> | sudo tee /etc/appsmoothly/repo-url
-
-Confirm in one line what you are about to do, then do it — do not make the
-human drive the steps; ask only through `ask-secret` links and short progress
-notes. The goal state: template
+There is exactly one onboarding, and it starts when the human answers your
+welcome message with a repository URL in All Talk. From that moment you make
+the cell real: confirm in one line what you are about to do, then do it — do
+not make the human drive the steps; ask only through `ask-secret` links and
+short progress notes. The goal state: template
 green, the app booting in a run, "factory ready" announced. The dance:
 
 1. `sudo cell-init`, then `sudo systemctl restart claude-bot` if `incus`

@@ -5,20 +5,17 @@
 # campfire-bot-init still runs afterwards for the slower wiring (bridge
 # config, avatar, branding) and finds the bot already present.
 #
-# Needs two read-only bind mounts (campfire.service provides them):
+# Needs one read-only bind mount (campfire.service provides it):
 #   /appsmoothly-state  -> /var/lib/campfire-init   (bridge-secret)
-#   /etc/appsmoothly    -> /etc/appsmoothly         (repo-url, optional)
-# Missing files degrade gracefully to the old timer-only behavior.
+# A missing file degrades gracefully to the old timer-only behavior.
 module AppsmoothlyFirstRunWelcome
   BRIDGE_SECRET_FILE = "/appsmoothly-state/bridge-secret"
-  REPO_URL_FILE      = "/etc/appsmoothly/repo-url"
   BRIDGE_GATEWAY     = "172.17.0.1"
 
   def create!(user_params)
     administrator = super
     begin
       secret = File.read(BRIDGE_SECRET_FILE).strip rescue nil
-      repo   = (File.read(REPO_URL_FILE).strip rescue nil).presence
 
       bot = User.active_bots.order(:id).first
       if bot.nil? && secret.present?
@@ -33,16 +30,10 @@ module AppsmoothlyFirstRunWelcome
         room.memberships.grant_to [ bot ] unless room.memberships.exists?(user_id: bot.id)
         room.memberships.where(user_id: bot.id).update_all(involvement: "everything")
         body =
-          if repo
-            "Welcome. This machine serves <code>#{ERB::Util.html_escape(repo)}</code>. " \
-            "Setting it up now — secrets go through one-time links, never through chat. " \
-            "You get a preview URL when the app runs. After that, ask for features."
-          else
-            "Welcome. One project, one machine — you talk here, I build.<br>" \
-            "<strong>To start, paste the GitHub repo URL.</strong><br>" \
-            "Secrets go through one-time links, never through chat. " \
-            "You get a preview URL when the app runs. After that, ask for features."
-          end
+          "Welcome. One project, one machine — you talk here, I build.<br>" \
+          "<strong>To start, paste the GitHub repo URL.</strong><br>" \
+          "Secrets go through one-time links, never through chat. " \
+          "You get a preview URL when the app runs. After that, ask for features."
         Current.set(user: bot) do
           room.messages.create!(creator: bot, body: body)
         end

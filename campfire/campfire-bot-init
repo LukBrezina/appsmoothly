@@ -139,25 +139,8 @@ docker exec campfire bin/rails runner '
 
 # The welcome itself is posted synchronously by the first-run initializer
 # (appsmoothly_first_run_welcome.rb), so it is already in All Talk when the
-# owner lands. What remains here is the handover for a known repo: a short
-# brief posted AS THE HUMAN and delivered -- the `room new --brief` pattern,
-# which is what starts the bot session so setup begins without anyone typing.
-REPO_URL_FILE=/etc/appsmoothly/repo-url
-if [ -r "$REPO_URL_FILE" ]; then
-    REPO_URL=$(tr -d '\r\n' < "$REPO_URL_FILE")
-    docker exec -e SETUP_REPO="$REPO_URL" campfire bin/rails runner '
-      user = User.where.not(role: :bot).order(:id).first
-      bot  = User.active_bots.order(:id).first
-      main = Room.where(name: "All Talk").where.not(type: "Rooms::Direct").order(:id).first
-      if user && bot && main
-        Current.user = user
-        repo = ERB::Util.html_escape(ENV["SETUP_REPO"])
-        body = "Set up #{repo} and get the app running. Ask me for secrets as you need them."
-        msg = main.messages.create!(creator: user, body: body)
-        bot.deliver_webhook_later(msg)
-      end
-    ' >/dev/null 2>&1 && echo "  setup brief posted to All Talk"
-fi
+# owner lands. There is exactly ONE onboarding: the welcome asks for the repo
+# URL, the human pastes it, and that message drives everything else.
 
 touch "$STATE/bot-done"
 systemctl disable --now campfire-bot-init.timer 2>/dev/null || true
