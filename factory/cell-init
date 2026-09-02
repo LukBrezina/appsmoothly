@@ -49,6 +49,39 @@ if [ "$(incus network get incusbr0 ipv4.address 2>/dev/null)" != "$FACTORY_NET_A
     echo "  bridge pinned to $FACTORY_NET_ADDR"
 fi
 
+echo "==> forwarding (docker coexistence)"
+# Docker (which runs Campfire in this VM) sets the iptables FORWARD policy to
+# DROP, which silently kills all egress from the incus bridge: containers can
+# resolve names (dnsmasq answers locally) but reach nothing. DOCKER-USER is
+# the chain Docker provides exactly so others can punch through -- an ACCEPT
+# there ends FORWARD traversal before Docker's drop. The rules do not survive
+# a reboot, so a oneshot unit reapplies them after docker is up.
+cat > /usr/local/sbin/factory-forward <<'EOF'
+#!/bin/sh
+# Allow the factory bridge through Docker's FORWARD DROP. Idempotent.
+iptables -C DOCKER-USER -i incusbr0 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -i incusbr0 -j ACCEPT
+iptables -C DOCKER-USER -o incusbr0 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -o incusbr0 -j ACCEPT
+EOF
+chmod 755 /usr/local/sbin/factory-forward
+cat > /etc/systemd/system/factory-forward.service <<'EOF'
+[Unit]
+Description=Allow factory containers through Docker's FORWARD policy
+After=docker.service incus.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/factory-forward
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now factory-forward.service >/dev/null 2>&1 || true
+/usr/local/sbin/factory-forward
+echo "  incusbr0 allowed through DOCKER-USER (persistent via factory-forward.service)"
+
 echo "==> permissions"
 # The run CLI and the chat bridge both run as lukas; incus-admin membership is
 # what lets them manage containers without sudo. Inside this VM that is not a
