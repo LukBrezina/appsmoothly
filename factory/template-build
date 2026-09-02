@@ -159,6 +159,32 @@ data["bypassPermissionsModeAccepted"] = True
 json.dump(data, open(path + ".tmp", "w"), indent=2)
 os.replace(path + ".tmp", path)
 PY' || true
+    # The agent that later runs inside a run needs to know WHERE it is, or it
+    # reinstalls toolchains that exist and builds worktrees it does not need
+    # -- exactly what the first live run did. ~/.claude/CLAUDE.md is user-
+    # level context, layered under the project's own CLAUDE.md.
+    as_dev_in base-builder -- bash -c 'install -d -m 755 /home/dev/.claude && cat > /home/dev/.claude/CLAUDE.md <<"EOF"
+# You are inside a factory run
+
+This container is one disposable piece of work. The app lives at
+/home/dev/app, already checked out on this run'"'"'s own branch, dependencies
+installed. Messages reach you from the project'"'"'s chat; keep replies short
+-- verdicts and links, not walls of text.
+
+- ruby/node come from mise shims. They are on PATH in login shells; if a
+  command cannot find ruby, run it as `bash -lc "..."` instead of
+  installing anything.
+- Work directly in /home/dev/app on the current branch. NO worktrees, no
+  fresh clones -- this container IS the isolation; there is nothing to
+  protect from yourself.
+- Serve the app on 127.0.0.1:3000; that port is already wired to this
+  run'"'"'s public preview URL.
+- Commit and push as you go (the GitHub token is wired via the credential
+  helper); open a PR when the work is ready.
+- sudo works and the container is disposable: be bold in here, careful in
+  git.
+EOF'
+
     # The credential helper answers github.com https fetches with whatever
     # token a container carries; identical contract to the VM's own helper.
     incus file push /usr/local/bin/git-credential-appsmoothly base-builder/usr/local/bin/git-credential-appsmoothly \

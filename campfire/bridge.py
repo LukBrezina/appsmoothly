@@ -226,6 +226,11 @@ class Session:
                 "incus", "exec", run,
                 "--user", "1000", "--group", "1000", "--cwd", run_cwd,
                 "--env", f"HOME={RUN_HOME}",
+                # Without SHELL, claude's login-shell snapshot may not pick
+                # up /etc/profile.d -- and then mise's shims (ruby, node)
+                # look absent inside the run.
+                "--env", "SHELL=/bin/bash",
+                "--env", "USER=dev",
                 "--env", f"CAMPFIRE_ROOM_PATH={self.room_path}",
                 "--env", f"CAMPFIRE_ROOM_NAME={self.room_name}",
                 "--env", f"CAMPFIRE_BASE={RUN_CAMPFIRE_BASE}",
