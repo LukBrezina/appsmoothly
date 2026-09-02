@@ -72,9 +72,13 @@ ensure_base() {
         set -e
         apt-get update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            git curl ca-certificates sudo tmux python3 build-essential pkg-config \
+            git gh curl ca-certificates sudo tmux python3 build-essential pkg-config \
             libyaml-dev libssl-dev zlib1g-dev libffi-dev libpq-dev libsqlite3-dev \
             libvips >/dev/null
+        # gh authenticates from GH_TOKEN; the run token is the natural value.
+        cat > /etc/profile.d/gh-token.sh <<"EOF"
+[ -r "$HOME/.secrets/GITHUB_TOKEN" ] && export GH_TOKEN="$(cat "$HOME/.secrets/GITHUB_TOKEN")"
+EOF
         # The image may already ship a default user at uid 1000 (ubuntu/24.04
         # does: "ubuntu"). The bridge addresses the run user by uid, so 1000
         # is the contract -- take over whoever holds it. Every step tolerates
