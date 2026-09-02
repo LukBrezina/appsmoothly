@@ -87,6 +87,12 @@ if [ -f /opt/claude-bot/avatar.png ]; then
 fi
 
 systemctl enable --now claude-bot
+# Wait until the bridge actually answers before anything below hands it a
+# message -- a webhook fired at a closed port is dropped, not retried.
+for i in $(seq 1 20); do
+    curl -s -o /dev/null --max-time 2 "http://$GW:4488/" && break
+    sleep 1
+done
 
 # Rooms.
 #
@@ -116,6 +122,20 @@ docker exec campfire bin/rails runner '
       Rooms::Open.create_for({ name: "System" }, users: [ user, bot ])
   end
 ' >/dev/null 2>&1 && echo "  rooms: All Talk (open, watched) + System"
+
+# Anything the human said between first-run and this moment fired its webhook
+# at a bridge that was not yet listening, and Campfire does not retry -- the
+# eager owner who pastes the repo URL right after the welcome would wait
+# forever. Replay the latest human message in All Talk so that window loses
+# nothing. (Usually there is none, and this is a no-op.)
+docker exec campfire bin/rails runner '
+  bot  = User.active_bots.order(:id).first
+  main = Room.where(name: "All Talk").where.not(type: "Rooms::Direct").order(:id).first
+  if bot && main
+    m = main.messages.where.not(creator: bot).order(:id).last
+    bot.deliver_webhook_later(m) if m
+  end
+' >/dev/null 2>&1 || true
 
 # The welcome itself is posted synchronously by the first-run initializer
 # (appsmoothly_first_run_welcome.rb), so it is already in All Talk when the
