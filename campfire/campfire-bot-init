@@ -117,16 +117,33 @@ docker exec campfire bin/rails runner '
   end
 ' >/dev/null 2>&1 && echo "  rooms: All Talk (open, watched) + System"
 
-# The setup brief. If the VM was told which repo it exists for (newproj
-# --repo writes /etc/appsmoothly/repo-url), the human's very first sight of
-# the chat is the bot already getting the app running -- not an empty room.
-# Posted AS THE HUMAN and delivered to the bot, the same way `room new
-# --brief` hands work over: that is what starts the bot's session. The bot
-# asks for secrets with ask-secret links as it needs them; the human's whole
-# job is to answer those.
+# The welcome. The human finishes first-run and lands in All Talk; that first
+# sight decides whether this feels like a product or an empty room. The bot
+# greets them either way:
+#
+#   repo known (newproj --repo wrote /etc/appsmoothly/repo-url)
+#     -> short welcome from the bot, then a setup brief posted AS THE HUMAN
+#        and delivered -- the `room new --brief` handover pattern, which is
+#        what starts the bot session so setup begins on its own.
+#   no repo
+#     -> the welcome explains what a cell is and asks for the repo URL; the
+#        human's answer is what starts the session, and the factory skill
+#        tells the bot what to do with it.
+post_as_bot() {
+    docker exec -e WELCOME_BODY="$1" campfire bin/rails runner '
+      bot  = User.active_bots.order(:id).first
+      main = Room.where(name: "All Talk").where.not(type: "Rooms::Direct").order(:id).first
+      if bot && main
+        Current.user = bot
+        main.messages.create!(creator: bot, body: ENV["WELCOME_BODY"])
+      end
+    ' >/dev/null 2>&1
+}
+
 REPO_URL_FILE=/etc/appsmoothly/repo-url
 if [ -r "$REPO_URL_FILE" ]; then
     REPO_URL=$(tr -d '\r\n' < "$REPO_URL_FILE")
+    post_as_bot "Welcome! This cell serves <code>$REPO_URL</code>. I am starting the setup now — follow along here. Whenever I need a secret (the GitHub token, app keys), I will post a secure one-time link; nothing sensitive ever goes through this chat."
     docker exec -e SETUP_REPO="$REPO_URL" campfire bin/rails runner '
       user = User.where.not(role: :bot).order(:id).first
       bot  = User.active_bots.order(:id).first
@@ -134,15 +151,17 @@ if [ -r "$REPO_URL_FILE" ]; then
       if user && bot && main
         Current.user = user
         repo = ERB::Util.html_escape(ENV["SETUP_REPO"])
-        body = "This cell exists to serve <code>#{repo}</code>. " \
-               "Set it up: follow the <strong>factory</strong> skill'"'"'s onboarding section -- " \
-               "get the template built from that repo, fix what its setup reports, " \
+        body = "Set this cell up to serve <code>#{repo}</code>: follow the factory skill onboarding section -- " \
+               "build the template from that repo, fix what its setup reports, " \
                "and finish by booting the app in a smoke run with a preview link. " \
                "Ask for any secrets with ask-secret; I will answer the links as they arrive."
         msg = main.messages.create!(creator: user, body: body)
         bot.deliver_webhook_later(msg)
       end
     ' >/dev/null 2>&1 && echo "  setup brief posted to All Talk"
+else
+    post_as_bot "Welcome — first run is done and this cell is yours. A <strong>cell</strong> is a disposable VM serving one project: this chat, me, and a small factory that keeps your app buildable straight from its repository.<br><br>Nothing is configured yet. <strong>Paste the GitHub URL of the repository this project should serve</strong>, and I will take it from there: clone it, build the template (kept at latest main automatically), ask for any secrets via secure one-time links — never through this chat — and finish by booting the app on a preview URL.<br><br>When I say <strong>factory ready</strong>, just ask for features in plain words: each one gets its own room, its own container, and its own preview link." \
+        && echo "  welcome posted to All Talk (awaiting repo URL)"
 fi
 
 touch "$STATE/bot-done"
