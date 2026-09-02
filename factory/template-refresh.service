@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh the factory template to latest main
+# No-op in a VM that is not a cell (template-build exits early), so this unit
+# is safe to install everywhere and only does work where a template exists.
+ConditionPathExists=/var/lib/factory/repo-url
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/template-build

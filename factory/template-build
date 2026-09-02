@@ -1,0 +1,171 @@
+#!/bin/bash
+# template-build [<git-url>] -- build or refresh this cell's template container.
+#
+# The template is the one deterministic thing in the factory: a stopped
+# container holding the project repo AT LATEST MAIN with its toolchain and
+# dependencies installed, so that a run copied from it starts from current
+# main in seconds instead of minutes of bundle install. Everything
+# app-specific beyond that single rule -- seeding, snapshots, schedules -- is
+# deliberately NOT here; that is the orchestrator's judgment, not config.
+#
+#   first call:   template-build https://github.com/you/yourapp.git
+#   afterwards:   template-build          # refresh -- also what the timer runs
+#
+# The refresh path is cheap when nothing changed (a git fetch), and on a change
+# it pulls, reinstalls deps and re-runs the repo's own `bin/setup`. A setup
+# failure does not delete anything: the template stays on the previous working
+# state of its checkout and the failure is posted to chat for the bot to look
+# at. Idempotent; safe on every timer tick.
+#
+# The GitHub token pasted via `ask-secret GITHUB_TOKEN ...` is copied into the
+# template so clones and fetches work. The claude OAuth token is NOT baked in
+# here -- `run new` pushes it into each run, so a template exported or copied
+# never carries it.
+set -euo pipefail
+
+[ "$(id -u)" = 0 ] || { echo "template-build: run as root" >&2; exit 1; }
+command -v incus >/dev/null 2>&1 || { echo "template-build: no incus -- run cell-init first" >&2; exit 1; }
+
+STATE=/var/lib/factory
+URL_FILE="$STATE/repo-url"
+LOG="$STATE/template.log"
+IMAGE="images:ubuntu/24.04"
+TOKEN_SRC=/home/lukas/.secrets/GITHUB_TOKEN
+
+URL="${1:-}"
+if [ -z "$URL" ]; then
+    [ -r "$URL_FILE" ] || { echo "usage: template-build <git-url>   (no repo recorded yet)" >&2; exit 1; }
+    URL=$(cat "$URL_FILE")
+else
+    install -d -m 775 -g incus-admin "$STATE"
+    printf '%s\n' "$URL" > "$URL_FILE"
+fi
+
+# Everything inside the container runs as this user; uid 1000 so the bridge can
+# address it with a constant.
+as_dev() { incus exec template --user 1000 --group 1000 --env HOME=/home/dev "$@"; }
+in_app() { as_dev --cwd /home/dev/app -- bash -lc "$1"; }
+
+tell() {  # post to chat if the bot machinery is present; never fail the build
+    sudo -u lukas /usr/local/bin/notify "$1" >/dev/null 2>&1 || true
+}
+
+push_github_token() {
+    [ -r "$TOKEN_SRC" ] || return 0
+    incus exec template -- install -d -m 700 -o 1000 -g 1000 /home/dev/.secrets
+    incus file push "$TOKEN_SRC" template/home/dev/.secrets/GITHUB_TOKEN \
+        --mode 0600 --uid 1000 --gid 1000 --quiet
+}
+
+# ---------------------------------------------------------------- refresh ---
+if incus info template >/dev/null 2>&1; then
+    WAS_RUNNING=$(incus list template --format csv -c s)
+    [ "$WAS_RUNNING" = "RUNNING" ] || incus start template
+    for i in $(seq 1 30); do as_dev -- true 2>/dev/null && break; sleep 1; done
+
+    push_github_token
+    # The template never leaves the clone's default branch (main, master,
+    # whatever the repo calls it) -- branches are cut in run copies, not here.
+    # So a refresh is exactly a fast-forward pull.
+    HEAD=$(in_app "git rev-parse HEAD" | tr -d '\r')
+    if ! in_app "git pull --ff-only --quiet"; then
+        echo "pull failed" >&2
+        [ "$WAS_RUNNING" = "RUNNING" ] || incus stop template --force 2>/dev/null || true
+        exit 1
+    fi
+    AFTER=$(in_app "git rev-parse HEAD" | tr -d '\r')
+    if [ "$HEAD" = "$AFTER" ]; then
+        [ "$WAS_RUNNING" = "RUNNING" ] || incus stop template
+        exit 0
+    fi
+
+    echo "template: ${HEAD:0:7} -> ${AFTER:0:7}"
+    {
+        in_app "mise install --quiet" &&
+        in_app "[ -x bin/setup ] && bin/setup || true"
+    } >"$LOG" 2>&1 || {
+        tell "factory: template refresh to ${AFTER:0:7} pulled, but deps/setup failed -- see $LOG on the cell. New runs will carry that state until main (or the template) is fixed."
+        echo "refresh setup failed at ${AFTER:0:7} (log: $LOG)" >&2
+        [ "$WAS_RUNNING" = "RUNNING" ] || incus stop template --force
+        exit 1
+    }
+    [ "$WAS_RUNNING" = "RUNNING" ] || incus stop template
+    echo "template now at ${AFTER:0:7}"
+    exit 0
+fi
+
+# ------------------------------------------------------------------ build ---
+echo "==> launching template container"
+incus launch "$IMAGE" template >/dev/null
+for i in $(seq 1 30); do incus exec template -- true 2>/dev/null && break; sleep 1; done
+# Wait for DNS/network inside the container, not just for exec to answer.
+for i in $(seq 1 30); do incus exec template -- getent hosts github.com >/dev/null 2>&1 && break; sleep 1; done
+
+echo "==> base system"
+incus exec template -- bash -c '
+    set -e
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+        git curl ca-certificates sudo tmux build-essential pkg-config \
+        libyaml-dev libssl-dev zlib1g-dev libffi-dev libpq-dev libsqlite3-dev \
+        libvips >/dev/null
+    id dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev
+    echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev
+    chmod 440 /etc/sudoers.d/dev
+'
+
+echo "==> mise"
+as_dev -- bash -c 'command -v ~/.local/bin/mise >/dev/null 2>&1 || curl -fsSL https://mise.run | sh' >/dev/null
+incus exec template -- bash -c '
+    cat > /etc/profile.d/mise-shims.sh <<EOF
+export PATH="\$HOME/.local/share/mise/shims:\$HOME/.local/bin:\$PATH"
+EOF
+'
+as_dev -- bash -lc 'mise settings set idiomatic_version_file_enable_tools ruby,node,python' >/dev/null 2>&1 || true
+
+echo "==> claude"
+as_dev -- bash -c 'command -v ~/.local/bin/claude >/dev/null 2>&1 || curl -fsSL https://claude.ai/install.sh | bash' >/dev/null 2>&1 \
+    || echo "  WARN: claude install failed; rerun later inside the container"
+# Same wrapper contract as the VM: the OAuth token lives root-owned in
+# /etc/claude (pushed per-run, not present in the template) and
+# ANTHROPIC_API_KEY must never override it.
+incus exec template -- bash -c '
+    cat > /usr/local/bin/claude <<"EOF"
+#!/bin/bash
+unset ANTHROPIC_API_KEY
+if [ -r /etc/claude/oauth-token ]; then
+    CLAUDE_CODE_OAUTH_TOKEN="$(cat /etc/claude/oauth-token)"
+elif sudo -n test -r /etc/claude/oauth-token 2>/dev/null; then
+    CLAUDE_CODE_OAUTH_TOKEN="$(sudo -n cat /etc/claude/oauth-token)"
+fi
+export CLAUDE_CODE_OAUTH_TOKEN
+exec "$HOME/.local/bin/claude" "$@"
+EOF
+    chmod 755 /usr/local/bin/claude
+    install -d -m 700 /etc/claude
+    echo "unset ANTHROPIC_API_KEY" > /etc/profile.d/00-anthropic-guard.sh
+'
+
+echo "==> repo"
+push_github_token
+# The credential helper answers github.com https fetches with the pasted
+# token; identical contract to the VM's own helper.
+incus file push /usr/local/bin/git-credential-appsmoothly template/usr/local/bin/git-credential-appsmoothly \
+    --mode 0755 --quiet 2>/dev/null || true
+as_dev -- bash -c 'git config --global credential.https://github.com.helper appsmoothly' 2>/dev/null || true
+as_dev -- git clone "$URL" /home/dev/app || {
+    tell "factory: could not clone $URL into the template. If it is private, paste a token with: ask-secret GITHUB_TOKEN \"to clone the project into the factory template\" and rerun template-build."
+    echo "clone failed -- is a GITHUB_TOKEN needed? (ask-secret GITHUB_TOKEN ...)" >&2
+    exit 1
+}
+
+echo "==> toolchain + deps (this is the slow part, once)"
+in_app "mise install" || echo "  WARN: mise install had errors" >&2
+if ! in_app "[ -x bin/setup ] && bin/setup || true" >"$LOG" 2>&1; then
+    tell "factory: template built, but the repo's bin/setup failed -- the app side needs a look before runs are useful. Log tail follows."
+    tail -5 "$LOG" | while read -r l; do tell "  $l"; done
+    echo "  WARN: bin/setup failed (log: $LOG) -- template usable for code work, app may need attention" >&2
+fi
+
+incus stop template
+echo "template built from $URL -- runs can now be created with: run new <name>"

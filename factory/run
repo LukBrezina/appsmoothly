@@ -1,0 +1,168 @@
+#!/bin/bash
+# run -- disposable work containers, copied from this cell's template.
+#
+#   run new <name> [--branch BR]   create a run: CoW copy of the template,
+#                                  branch checked out, claude token in place,
+#                                  preview route <name>.<project>... wired
+#   run list                       every run: state, branch, port
+#   run sleep <name>               stop it -- costs nothing while stopped
+#   run wake <name>                start it again (seconds; state survives)
+#   run exec <name> -- cmd...      run a command inside it, as dev, in the app
+#   run rm <name>                  delete it and its preview route for good
+#
+# One run = one piece of work: the repo on its own branch, the app runnable
+# inside, a claude session working in it (attach a room to it with
+# `room set <room> --run <name>` -- the room's session then lives INSIDE the
+# run). Sleep instead of rm when work might resume: a stopped container keeps
+# all state and uses no RAM. rm is for merged/abandoned work; it asks nothing
+# and recovers nothing.
+#
+# Runs as lukas (incus-admin); only the caddy route file needs sudo.
+set -euo pipefail
+
+STATE=/var/lib/factory
+REG="$STATE/runs.tsv"          # name<TAB>port<TAB>branch
+PORT_BASE=20100
+ROUTES=/etc/caddy/routes
+
+usage() { sed -n '2,/^set -euo/p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit "${1:-1}"; }
+
+need_cell() {
+    command -v incus >/dev/null 2>&1 && [ -d "$STATE" ] ||
+        { echo "run: this VM is not a cell yet -- cell-init, then template-build" >&2; exit 1; }
+    touch "$REG" 2>/dev/null || true
+}
+
+valid_name() {
+    [[ "$1" =~ ^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$ ]] ||
+        { echo "run: name must be lowercase alnum/dash (it becomes a hostname label)" >&2; exit 1; }
+    case "$1" in app|notes|secret|template)
+        echo "run: '$1' is a reserved hostname" >&2; exit 1 ;; esac
+}
+
+as_dev() { incus exec "run-$1" --user 1000 --group 1000 --env HOME=/home/dev "${@:2}"; }
+
+reload_caddy() { sudo -n systemctl reload caddy >/dev/null 2>&1 || true; }
+
+CMD="${1:-}"; shift || true
+case "$CMD" in
+
+new)
+    need_cell
+    NAME="${1:-}"; shift || true
+    [ -n "$NAME" ] || usage
+    valid_name "$NAME"
+    BRANCH="$NAME"
+    while [ $# -gt 0 ]; do case "$1" in
+        --branch) BRANCH="${2:-$NAME}"; shift 2 ;;
+        *) echo "run new: unknown option '$1'" >&2; exit 1 ;;
+    esac; done
+    incus info template >/dev/null 2>&1 || { echo "run: no template -- template-build first" >&2; exit 1; }
+
+    # Port: stable per run, allocated once, never reused while recorded.
+    PORT=$(awk -F'\t' -v n="$NAME" '$1==n{print $2}' "$REG" | head -1)
+    if [ -z "$PORT" ]; then
+        USED=$(cut -f2 "$REG")
+        PORT=$PORT_BASE
+        while grep -qx "$PORT" <<<"$USED"; do PORT=$((PORT+1)); done
+        printf '%s\t%s\t%s\n' "$NAME" "$PORT" "$BRANCH" >> "$REG"
+    fi
+
+    if ! incus info "run-$NAME" >/dev/null 2>&1; then
+        # The copy is the whole point of the template: CoW on btrfs, so this
+        # is instant and the run stores only what it changes.
+        incus copy template "run-$NAME"
+        echo "created run-$NAME (branch $BRANCH, port $PORT)"
+    else
+        echo "run-$NAME exists; refreshing wiring"
+    fi
+    incus start "run-$NAME" 2>/dev/null || true
+    for i in $(seq 1 30); do incus exec "run-$NAME" -- true 2>/dev/null && break; sleep 1; done
+
+    # The claude OAuth token is pushed per-run rather than baked into the
+    # template, so a template copied or exported never carries it. Root-owned
+    # 0600 in the run; the wrapper reads it with sudo, same as in the VM.
+    if sudo -n test -r /etc/claude/oauth-token 2>/dev/null; then
+        sudo -n cat /etc/claude/oauth-token |
+            incus file push - "run-$NAME/etc/claude/oauth-token" --mode 0600 --quiet
+    else
+        echo "  WARN: no /etc/claude/oauth-token in this VM; claude in the run will not authenticate" >&2
+    fi
+
+    # Branch: reuse a remote branch of this name if it exists, otherwise cut
+    # it fresh from current main (which is what the template is).
+    as_dev "$NAME" --cwd /home/dev/app -- bash -lc "
+        git fetch --quiet origin || true
+        if git show-ref --quiet refs/remotes/origin/$BRANCH; then
+            git checkout --quiet -B $BRANCH origin/$BRANCH
+        else
+            git checkout --quiet -B $BRANCH
+        fi" || echo "  WARN: branch checkout failed; the run is on the template's main" >&2
+
+    # Preview wiring: VM-local port -> the run's app, and a hostname route to
+    # that port. The app inside should listen on 127.0.0.1:3000 like the main
+    # project app does.
+    incus config device add "run-$NAME" web proxy \
+        "listen=tcp:127.0.0.1:$PORT" "connect=tcp:127.0.0.1:3000" >/dev/null 2>&1 || true
+    if [ ! -f "$ROUTES/run-$NAME.caddy" ]; then
+        sudo -n tee "$ROUTES/run-$NAME.caddy" >/dev/null <<CADDY
+# generated by \`run new $NAME\` -- removed by \`run rm $NAME\`
+@run-$NAME header_regexp Host ^$NAME\\.
+handle @run-$NAME {
+	reverse_proxy 127.0.0.1:$PORT {
+		header_up X-Forwarded-Proto https
+	}
+}
+CADDY
+        reload_caddy
+    fi
+
+    echo "run-$NAME ready"
+    echo "  branch : $BRANCH"
+    echo "  preview: https://$NAME.<project>.appsmoothly.com  (once the app listens on :3000 inside)"
+    echo "  attach a room: room set <room> --run $NAME    (or room new ... --run $NAME)"
+    ;;
+
+list)
+    need_cell
+    printf '%-18s %-10s %-22s %s\n' RUN STATE BRANCH PORT
+    while IFS=$'\t' read -r n p b; do
+        [ -n "$n" ] || continue
+        S=$(incus list "run-$n" --format csv -c s 2>/dev/null | head -1)
+        printf '%-18s %-10s %-22s %s\n' "$n" "${S:-MISSING}" "$b" "$p"
+    done < "$REG"
+    ;;
+
+sleep)
+    need_cell
+    NAME="${1:?usage: run sleep <name>}"
+    incus stop "run-$NAME" 2>/dev/null || incus stop "run-$NAME" --force
+    echo "run-$NAME asleep (0 RAM; 'run wake $NAME' or a room message brings it back)"
+    ;;
+
+wake)
+    need_cell
+    NAME="${1:?usage: run wake <name>}"
+    incus start "run-$NAME" 2>/dev/null || true
+    echo "run-$NAME awake"
+    ;;
+
+exec)
+    need_cell
+    NAME="${1:?usage: run exec <name> -- cmd...}"; shift
+    [ "${1:-}" = "--" ] && shift
+    incus start "run-$NAME" 2>/dev/null || true
+    as_dev "$NAME" --cwd /home/dev/app -- bash -lc "$*"
+    ;;
+
+rm)
+    need_cell
+    NAME="${1:?usage: run rm <name>}"
+    incus delete "run-$NAME" --force 2>/dev/null || true
+    sudo -n rm -f "$ROUTES/run-$NAME.caddy" && reload_caddy
+    grep -vP "^\Q$NAME\E\t" "$REG" > "$REG.tmp" 2>/dev/null && mv "$REG.tmp" "$REG" || true
+    echo "run-$NAME deleted (branch and PR live on in git; the container is gone)"
+    ;;
+
+*) usage 0 ;;
+esac

@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll the project repo and refresh the factory template
+
+[Timer]
+# A tailnet-only VM cannot receive GitHub webhooks, so the template polls.
+# A fetch with nothing new is a few seconds of network and nothing else.
+OnBootSec=5min
+OnUnitActiveSec=10min
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

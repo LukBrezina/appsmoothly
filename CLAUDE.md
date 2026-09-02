@@ -33,6 +33,12 @@ room can run in its own directory — so a feature gets its own room, its own
 conversation and its own worktree. Open one with `room new`, close it when the
 work ships. See the `feature-rooms` skill.
 
+When this VM is a **factory cell**, a room can go further and run inside its
+own disposable *container* — a copy of a template that always tracks the
+repo's main branch, with the app runnable inside and its own preview URL:
+`run new <name>`, then `room new ... --run <name>`. Sleeping runs cost
+nothing and wake on a message. See the `factory` skill.
+
 Two consequences that are easy to get wrong: **everything you say goes to your
 own room** — creating another room does not move you into it — and **a room
 nobody has spoken in has no session**. So open a feature room *with its work*,

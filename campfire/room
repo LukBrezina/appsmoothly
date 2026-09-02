@@ -1,11 +1,11 @@
 #!/bin/bash
 # room -- rooms Claude actually talks in.
 #
-#   room new "Search rewrite" [--cwd DIR] [--brief "..."] [--model M]
+#   room new "Search rewrite" [--cwd DIR] [--run NAME] [--brief "..."] [--model M]
 #                                   open a room, hand the work over, announce it
 #   room list                       every room: watched, model, directory
 #   room say <name|id> "text"       post into a room you are not in
-#   room set <name|id> [--cwd DIR] [--model M] [--route NAME] [--service UNIT]
+#   room set <name|id> [--cwd DIR] [--run NAME] [--model M] [--route NAME] [--service UNIT]
 #                                   record what this room runs on and owns
 #   room watch|unwatch <name|id>    answer everything here / only when tagged
 #   room archive <name|id> [--purge]  work is done: hide it, keep the history
@@ -156,8 +156,16 @@ post_here() {
 # recorded for it -- see `room set` -- because guessing what a project built is
 # how you delete someone's work.
 purge_room() {  # <room_id>
-    local cwd route service common main
+    local cwd route service run common main
     cwd=$(map_get "$1" cwd); route=$(map_get "$1" route); service=$(map_get "$1" service)
+    run=$(map_get "$1" run)
+
+    # A recorded run is the room's container: branch and PR live on in git, the
+    # container itself is disposable by design. `run rm` also removes its
+    # preview route.
+    if [ -n "$run" ] && command -v run >/dev/null 2>&1; then
+        run rm "${run#run-}" && echo "  removed $run" || echo "  could not remove $run" >&2
+    fi
 
     if [ -n "$service" ]; then
         sudo -n systemctl disable --now "$service" >/dev/null 2>&1 &&
@@ -206,10 +214,11 @@ case "${1:-}" in
 
 new)
     shift
-    TITLE=""; CWD=""; BRIEF=""; MODEL="$FEATURE_MODEL"
+    TITLE=""; CWD=""; RUN=""; BRIEF=""; MODEL="$FEATURE_MODEL"
     while [ $# -gt 0 ]; do
         case "$1" in
             --cwd)   CWD="${2:-}"; shift 2 ;;
+            --run)   RUN="${2:-}"; shift 2 ;;
             --brief) BRIEF="${2:-}"; shift 2 ;;
             --model) MODEL="${2:-}"; shift 2 ;;
             -h|--help) usage 0 ;;
@@ -217,8 +226,16 @@ new)
         esac
     done
     [ -n "$TITLE" ] || usage
-    [ -z "$CWD" ] || CWD=$(cd "$CWD" && pwd)   # fail loudly if it does not exist
-    [ -z "$CWD" ] || trust_dir "$CWD"
+    # With --run, the session lives inside that container and a --cwd is a
+    # path in there -- nothing to validate or trust from out here.
+    if [ -z "$RUN" ]; then
+        [ -z "$CWD" ] || CWD=$(cd "$CWD" && pwd)   # fail loudly if it does not exist
+        [ -z "$CWD" ] || trust_dir "$CWD"
+    else
+        RUN="run-${RUN#run-}"
+        incus info "$RUN" >/dev/null 2>&1 ||
+            { echo "room new: no container '$RUN' -- create it first: run new ${RUN#run-}" >&2; exit 1; }
+    fi
 
     OUT=$(rails_runner '
       title = ENV["ROOM_TITLE"]
@@ -247,6 +264,7 @@ new)
     esac
 
     [ -n "$CWD" ]   && map_set "$ID" cwd "$CWD"
+    [ -n "$RUN" ]   && map_set "$ID" run "$RUN"
     [ -n "$MODEL" ] && map_set "$ID" model "$MODEL"
     bridge_close "$ID"     # start clean if the id was ever used before
     URL="$(project_url)/rooms/$ID"
@@ -255,6 +273,7 @@ new)
     # looks broken from the outside: the room exists and nothing happens in it.
     # Say what it is for, so anyone opening it sees it is live.
     OPENER="This room is <strong>$(esc "$TITLE")</strong>."
+    [ -n "$RUN" ]   && OPENER="$OPENER Working inside <code>$(esc "$RUN")</code> — its own container, its own app."
     [ -n "$CWD" ]   && OPENER="$OPENER Working in <code>$(esc "$CWD")</code>."
     [ -n "$MODEL" ] && OPENER="$OPENER Running on <code>$(esc "$MODEL")</code>."
     OPENER="$OPENER I answer every message here, no need to tag me."
@@ -350,6 +369,9 @@ set)
         case "$1" in
             --cwd)     D=$(cd "${2:-}" && pwd); map_set "$ID" cwd "$D"; trust_dir "$D"
                        echo "  cwd     = $D"; RESTART=1; shift 2 ;;
+            --run)     R="run-${2#run-}"; map_set "$ID" run "$R"
+                       echo "  run     = $R  (session moves inside it; removed on --purge)"
+                       RESTART=1; shift 2 ;;
             --model)   map_set "$ID" model "${2:-}"; echo "  model   = ${2:-}"; RESTART=1; shift 2 ;;
             --route)   map_set "$ID" route "${2:-}"; echo "  route   = ${2:-}  (removed on --purge)"; shift 2 ;;
             --service) map_set "$ID" service "${2:-}"; echo "  service = ${2:-}  (stopped on --purge)"; shift 2 ;;

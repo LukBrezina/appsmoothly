@@ -45,6 +45,14 @@ LISTEN_ADDR = os.environ.get("LISTEN_ADDR", "172.17.0.1")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "4488"))
 CAMPFIRE_BASE = os.environ.get("CAMPFIRE_BASE", "http://127.0.0.1:8080").rstrip("/")
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
+# A room can be backed by a factory run (see the factory skill): its session
+# then executes INSIDE that container, so the agent's shell, toolchain and
+# blast radius are the run's, not the VM's. Constants, not configuration: the
+# wrapper path is fixed by template-build and the gateway by cell-init.
+RUN_CLAUDE_BIN = "/usr/local/bin/claude"
+RUN_HOME = "/home/dev"
+RUN_WORKDIR = "/home/dev/app"
+RUN_CAMPFIRE_BASE = "http://10.101.0.1:80"
 WORKDIR = os.environ.get("WORKDIR", "/home/appsmoothly")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet")
 SESSIONS_FILE = os.environ.get(
@@ -182,8 +190,9 @@ class Session:
 
     def start(self):
         model = room_model(self.room_id)
+        run = room_conf(self.room_id).get("run")
         cmd = [
-            CLAUDE_BIN, "-p", "--verbose",
+            RUN_CLAUDE_BIN if run else CLAUDE_BIN, "-p", "--verbose",
             # Chat is mostly questions, so a plain conversation runs on a fast
             # model; a feature room asks for a stronger one when it is created.
             # Heavier still can be delegated to a subagent pinned to its own
@@ -205,6 +214,24 @@ class Session:
         env["CAMPFIRE_ROOM_NAME"] = self.room_name
         env["CAMPFIRE_BASE"] = CAMPFIRE_BASE
         cwd = room_workdir(self.room_id)
+        if run:
+            # Wake the run if it is asleep -- a message to its room is the
+            # wake signal -- then wrap the same claude invocation in an exec
+            # into the container. The room's cwd, if set, is a path INSIDE
+            # the run; room_workdir() cannot validate that from out here, so
+            # it is taken as recorded.
+            subprocess.run(["incus", "start", run], capture_output=True)
+            run_cwd = room_conf(self.room_id).get("cwd") or RUN_WORKDIR
+            cmd = [
+                "incus", "exec", run,
+                "--user", "1000", "--group", "1000", "--cwd", run_cwd,
+                "--env", f"HOME={RUN_HOME}",
+                "--env", f"CAMPFIRE_ROOM_PATH={self.room_path}",
+                "--env", f"CAMPFIRE_ROOM_NAME={self.room_name}",
+                "--env", f"CAMPFIRE_BASE={RUN_CAMPFIRE_BASE}",
+                "--",
+            ] + cmd
+            cwd = WORKDIR  # the VM-side cwd of the exec client is irrelevant
         try:
             self.proc = subprocess.Popen(
                 cmd, cwd=cwd, env=env, stdin=subprocess.PIPE,
@@ -215,7 +242,8 @@ class Session:
             return False
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._drain_stderr, daemon=True).start()
-        log(f"room {self.room_id}: session started in {cwd} on {model}"
+        where = f"run {run}" if run else cwd
+        log(f"room {self.room_id}: session started in {where} on {model}"
             f"{' (resumed)' if resume else ''}")
         return True
 

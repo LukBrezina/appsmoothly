@@ -1,0 +1,65 @@
+#!/bin/bash
+# cell-init -- turn this VM into a factory cell: able to hold a template
+# container and disposable run containers copied from it.
+#
+# A "run" is one piece of work: its own container with the repo checked out on
+# a branch, the app runnable inside, and a claude session working in it. Runs
+# are copies of the "template" container, which tracks the repo's main branch
+# (see template-build). This script installs the machinery those need:
+#
+#   - incus, for system containers inside this VM (the VM is KVM, so nested
+#     containers are ordinary containers -- no nested virtualization involved)
+#   - a btrfs storage pool, because `incus copy` on btrfs is copy-on-write:
+#     creating a run from a multi-gigabyte template is instant and each run
+#     stores only its diff
+#   - a bridge with a FIXED subnet, so everything else (the chat bridge, caddy
+#     routes) can rely on one well-known gateway address instead of discovering
+#     a random one
+#
+# Idempotent: run it again after an update and it fixes drift, touches nothing
+# that is already right, and never recreates the pool or bridge.
+set -euo pipefail
+
+[ "$(id -u)" = 0 ] || { echo "cell-init: run as root" >&2; exit 1; }
+
+# One well-known subnet for run containers, the same in every cell. Cells are
+# separate VMs, so this never collides with anything -- and a constant beats a
+# discovered value everywhere downstream.
+FACTORY_NET_ADDR="10.101.0.1/24"
+
+echo "==> incus"
+if ! command -v incus >/dev/null 2>&1; then
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq incus btrfs-progs >/dev/null
+    echo "  installed"
+else
+    echo "  present"
+fi
+
+echo "==> storage + network"
+if ! incus storage show default >/dev/null 2>&1; then
+    # --auto creates a btrfs loop pool sized to the disk and a NAT bridge.
+    incus admin init --auto --storage-backend btrfs >/dev/null
+    echo "  initialized (btrfs pool)"
+else
+    echo "  pool present ($(incus storage get default source 2>/dev/null | head -1))"
+fi
+if [ "$(incus network get incusbr0 ipv4.address 2>/dev/null)" != "$FACTORY_NET_ADDR" ]; then
+    incus network set incusbr0 ipv4.address="$FACTORY_NET_ADDR" ipv6.address=none
+    echo "  bridge pinned to $FACTORY_NET_ADDR"
+fi
+
+echo "==> permissions"
+# The run CLI and the chat bridge both run as lukas; incus-admin membership is
+# what lets them manage containers without sudo. Inside this VM that is not a
+# privilege escalation -- lukas already has passwordless sudo here.
+if ! id -nG lukas | grep -qw incus-admin; then
+    usermod -aG incus-admin lukas
+    echo "  lukas -> incus-admin (bridge/bot services must restart to see it)"
+else
+    echo "  lukas in incus-admin"
+fi
+
+install -d -m 775 -o root -g incus-admin /var/lib/factory
+
+echo "cell ready -- next: template-build <git-url>"
