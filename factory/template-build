@@ -1,5 +1,6 @@
 #!/bin/bash
-# template-build [<git-url>] -- build or refresh this cell's template container.
+# template-build [<git-url> | --base-only] -- build or refresh this cell's
+# template container.
 #
 # The template is the one deterministic thing in the factory: a stopped
 # container holding the project repo AT LATEST MAIN with its toolchain and
@@ -10,6 +11,15 @@
 #
 #   first call:   template-build https://github.com/you/yourapp.git
 #   afterwards:   template-build          # refresh -- also what the timer runs
+#   --base-only   just make sure the factory-base image exists (used when
+#                 baking it into a golden image)
+#
+# The system layer -- build-essential and the libraries basically every Rails
+# app needs, the dev user, mise, claude -- is built ONCE into a local image
+# called factory-base, and every template build starts from that instead of
+# from a vanilla Ubuntu. That turns the ~12 minutes of apt into a one-time
+# cost per cell (and a zero cost once the base is baked into the golden
+# image).
 #
 # The refresh path is cheap when nothing changed (a git fetch), and on a change
 # it pulls, reinstalls deps and re-runs the repo's own `bin/setup`. A setup
@@ -19,8 +29,8 @@
 #
 # The GitHub token pasted via `ask-secret GITHUB_TOKEN ...` is copied into the
 # template so clones and fetches work. The claude OAuth token is NOT baked in
-# here -- `run new` pushes it into each run, so a template exported or copied
-# never carries it.
+# anywhere here -- `run new` pushes it into each run, so neither the base
+# image nor the template ever carries it.
 set -euo pipefail
 
 [ "$(id -u)" = 0 ] || { echo "template-build: run as root" >&2; exit 1; }
@@ -30,7 +40,130 @@ STATE=/var/lib/factory
 URL_FILE="$STATE/repo-url"
 LOG="$STATE/template.log"
 IMAGE="images:ubuntu/24.04"
+BASE=factory-base
 TOKEN_SRC=/home/lukas/.secrets/GITHUB_TOKEN
+
+# Everything inside a container runs as this user; uid 1000 so the bridge can
+# address it with a constant.
+as_dev_in() { local c="$1"; shift; incus exec "$c" --user 1000 --group 1000 --env HOME=/home/dev "$@"; }
+as_dev() { as_dev_in template "$@"; }
+in_app() { as_dev --cwd /home/dev/app -- bash -lc "$1"; }
+
+wait_ready() {  # <container> -> exec answers and DNS resolves
+    local c="$1" i
+    for i in $(seq 1 30); do incus exec "$c" -- true 2>/dev/null && break; sleep 1; done
+    for i in $(seq 1 30); do incus exec "$c" -- getent hosts github.com >/dev/null 2>&1 && break; sleep 1; done
+}
+
+tell() {  # post to chat if the bot machinery is present; never fail the build
+    sudo -u lukas /usr/local/bin/notify "$1" >/dev/null 2>&1 || true
+}
+
+# ------------------------------------------------------------ base image ---
+ensure_base() {
+    incus image info "$BASE" >/dev/null 2>&1 && return 0
+    echo "==> building $BASE (once -- later template builds start from it)"
+    incus delete base-builder --force 2>/dev/null || true
+    incus launch "$IMAGE" base-builder >/dev/null
+    wait_ready base-builder
+
+    echo "  base system"
+    incus exec base-builder -- bash -c '
+        set -e
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            git curl ca-certificates sudo tmux python3 build-essential pkg-config \
+            libyaml-dev libssl-dev zlib1g-dev libffi-dev libpq-dev libsqlite3-dev \
+            libvips >/dev/null
+        # The image may already ship a default user at uid 1000 (ubuntu/24.04
+        # does: "ubuntu"). The bridge addresses the run user by uid, so 1000
+        # is the contract -- take over whoever holds it. Every step tolerates
+        # any half-state a previous attempt left behind: no -m home move (it
+        # refuses if the target exists), ownership fixed explicitly instead.
+        if ! getent passwd dev >/dev/null; then
+            existing=$(getent passwd 1000 | cut -d: -f1 || true)
+            if [ -n "$existing" ]; then
+                usermod -l dev "$existing"
+                groupmod -n dev "$existing" 2>/dev/null || true
+            else
+                useradd -u 1000 -s /bin/bash dev
+            fi
+        fi
+        usermod -d /home/dev -s /bin/bash dev
+        install -d /home/dev
+        chown 1000:1000 /home/dev
+        echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev
+        chmod 440 /etc/sudoers.d/dev
+    '
+
+    echo "  mise"
+    as_dev_in base-builder -- bash -c 'command -v ~/.local/bin/mise >/dev/null 2>&1 || curl -fsSL https://mise.run | sh' >/dev/null
+    # Shims first for ruby/node -- but ~/.local/bin goes LAST, or the raw
+    # claude binary there shadows the /usr/local/bin/claude wrapper that
+    # injects the OAuth token, and every claude call in a run is silently
+    # unauthenticated.
+    incus exec base-builder -- bash -c '
+        cat > /etc/profile.d/mise-shims.sh <<EOF
+export PATH="\$HOME/.local/share/mise/shims:\$PATH:\$HOME/.local/bin"
+EOF
+    '
+    as_dev_in base-builder -- bash -lc 'mise settings set idiomatic_version_file_enable_tools ruby,node,python' >/dev/null 2>&1 || true
+
+    echo "  claude"
+    as_dev_in base-builder -- bash -c 'command -v ~/.local/bin/claude >/dev/null 2>&1 || curl -fsSL https://claude.ai/install.sh | bash' >/dev/null 2>&1 \
+        || echo "  WARN: claude install failed; rerun later inside the container"
+    # Same wrapper contract as the VM: the OAuth token lives root-owned in
+    # /etc/claude (pushed per-run, never baked in) and ANTHROPIC_API_KEY must
+    # never override it.
+    incus exec base-builder -- bash -c '
+        cat > /usr/local/bin/claude <<"EOF"
+#!/bin/bash
+unset ANTHROPIC_API_KEY
+if [ -r /etc/claude/oauth-token ]; then
+    CLAUDE_CODE_OAUTH_TOKEN="$(cat /etc/claude/oauth-token)"
+elif sudo -n test -r /etc/claude/oauth-token 2>/dev/null; then
+    CLAUDE_CODE_OAUTH_TOKEN="$(sudo -n cat /etc/claude/oauth-token)"
+fi
+export CLAUDE_CODE_OAUTH_TOKEN
+exec "$HOME/.local/bin/claude" "$@"
+EOF
+        chmod 755 /usr/local/bin/claude
+        install -d -m 700 /etc/claude
+        echo "unset ANTHROPIC_API_KEY" > /etc/profile.d/00-anthropic-guard.sh
+    '
+    # Claude Code will not read the checkout's settings until the directory is
+    # trusted, and there is nobody in a run to click a dialog -- the VM (not a
+    # path inside a container) is the security boundary, same reasoning as
+    # trust_dir in `room`. /home/dev/app is a constant, so this bakes cleanly.
+    as_dev_in base-builder -- bash -c 'python3 - <<"PY"
+import json, os
+path = "/home/dev/.claude.json"
+try:
+    data = json.load(open(path))
+except Exception:
+    data = {}
+entry = data.setdefault("projects", {}).setdefault("/home/dev/app", {})
+entry["hasTrustDialogAccepted"] = True
+data["bypassPermissionsModeAccepted"] = True
+json.dump(data, open(path + ".tmp", "w"), indent=2)
+os.replace(path + ".tmp", path)
+PY' || true
+    # The credential helper answers github.com https fetches with whatever
+    # token a container carries; identical contract to the VM's own helper.
+    incus file push /usr/local/bin/git-credential-appsmoothly base-builder/usr/local/bin/git-credential-appsmoothly \
+        --mode 0755 --quiet 2>/dev/null || true
+    as_dev_in base-builder -- bash -c 'git config --global credential.https://github.com.helper appsmoothly' 2>/dev/null || true
+
+    incus stop base-builder
+    incus publish base-builder --alias "$BASE" --quiet >/dev/null
+    incus delete base-builder
+    echo "  $BASE published"
+}
+
+if [ "${1:-}" = "--base-only" ]; then
+    ensure_base
+    exit 0
+fi
 
 URL="${1:-}"
 if [ -z "$URL" ]; then
@@ -40,15 +173,6 @@ else
     install -d -m 775 -g incus-admin "$STATE"
     printf '%s\n' "$URL" > "$URL_FILE"
 fi
-
-# Everything inside the container runs as this user; uid 1000 so the bridge can
-# address it with a constant.
-as_dev() { incus exec template --user 1000 --group 1000 --env HOME=/home/dev "$@"; }
-in_app() { as_dev --cwd /home/dev/app -- bash -lc "$1"; }
-
-tell() {  # post to chat if the bot machinery is present; never fail the build
-    sudo -u lukas /usr/local/bin/notify "$1" >/dev/null 2>&1 || true
-}
 
 push_github_token() {
     [ -r "$TOKEN_SRC" ] || return 0
@@ -87,12 +211,7 @@ inject_app_files() {
 if incus info template >/dev/null 2>&1; then
     WAS_RUNNING=$(incus list template --format csv -c s)
     [ "$WAS_RUNNING" = "RUNNING" ] || incus start template
-    for i in $(seq 1 30); do as_dev -- true 2>/dev/null && break; sleep 1; done
-    # Same race as in `run new`: exec answers before DHCP/DNS is up, and the
-    # first thing this path does is a git pull.
-    for i in $(seq 1 20); do
-        incus exec template -- getent hosts github.com >/dev/null 2>&1 && break; sleep 1
-    done
+    wait_ready template
 
     push_github_token
     # The template never leaves the clone's default branch (main, master,
@@ -127,100 +246,14 @@ if incus info template >/dev/null 2>&1; then
 fi
 
 # ------------------------------------------------------------------ build ---
-echo "==> launching template container"
-incus launch "$IMAGE" template >/dev/null
-for i in $(seq 1 30); do incus exec template -- true 2>/dev/null && break; sleep 1; done
-# Wait for DNS/network inside the container, not just for exec to answer.
-for i in $(seq 1 30); do incus exec template -- getent hosts github.com >/dev/null 2>&1 && break; sleep 1; done
+ensure_base
 
-echo "==> base system"
-incus exec template -- bash -c '
-    set -e
-    apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        git curl ca-certificates sudo tmux python3 build-essential pkg-config \
-        libyaml-dev libssl-dev zlib1g-dev libffi-dev libpq-dev libsqlite3-dev \
-        libvips >/dev/null
-    # The image may already ship a default user at uid 1000 (ubuntu/24.04
-    # does: "ubuntu"). The bridge addresses the run user by uid, so 1000 is
-    # the contract -- take over whoever holds it. Every step here tolerates
-    # any half-state a previous attempt left behind: no -m home move (it
-    # refuses if the target exists), ownership fixed explicitly instead.
-    if ! getent passwd dev >/dev/null; then
-        existing=$(getent passwd 1000 | cut -d: -f1 || true)
-        if [ -n "$existing" ]; then
-            usermod -l dev "$existing"
-            groupmod -n dev "$existing" 2>/dev/null || true
-        else
-            useradd -u 1000 -s /bin/bash dev
-        fi
-    fi
-    usermod -d /home/dev -s /bin/bash dev
-    install -d /home/dev
-    chown 1000:1000 /home/dev
-    echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev
-    chmod 440 /etc/sudoers.d/dev
-'
-
-echo "==> mise"
-as_dev -- bash -c 'command -v ~/.local/bin/mise >/dev/null 2>&1 || curl -fsSL https://mise.run | sh' >/dev/null
-# Shims first for ruby/node -- but ~/.local/bin goes LAST, or the raw claude
-# binary there shadows the /usr/local/bin/claude wrapper that injects the
-# OAuth token, and every claude call in a run is silently unauthenticated.
-incus exec template -- bash -c '
-    cat > /etc/profile.d/mise-shims.sh <<EOF
-export PATH="\$HOME/.local/share/mise/shims:\$PATH:\$HOME/.local/bin"
-EOF
-'
-as_dev -- bash -lc 'mise settings set idiomatic_version_file_enable_tools ruby,node,python' >/dev/null 2>&1 || true
-
-echo "==> claude"
-as_dev -- bash -c 'command -v ~/.local/bin/claude >/dev/null 2>&1 || curl -fsSL https://claude.ai/install.sh | bash' >/dev/null 2>&1 \
-    || echo "  WARN: claude install failed; rerun later inside the container"
-# Same wrapper contract as the VM: the OAuth token lives root-owned in
-# /etc/claude (pushed per-run, not present in the template) and
-# ANTHROPIC_API_KEY must never override it.
-incus exec template -- bash -c '
-    cat > /usr/local/bin/claude <<"EOF"
-#!/bin/bash
-unset ANTHROPIC_API_KEY
-if [ -r /etc/claude/oauth-token ]; then
-    CLAUDE_CODE_OAUTH_TOKEN="$(cat /etc/claude/oauth-token)"
-elif sudo -n test -r /etc/claude/oauth-token 2>/dev/null; then
-    CLAUDE_CODE_OAUTH_TOKEN="$(sudo -n cat /etc/claude/oauth-token)"
-fi
-export CLAUDE_CODE_OAUTH_TOKEN
-exec "$HOME/.local/bin/claude" "$@"
-EOF
-    chmod 755 /usr/local/bin/claude
-    install -d -m 700 /etc/claude
-    echo "unset ANTHROPIC_API_KEY" > /etc/profile.d/00-anthropic-guard.sh
-'
-# Claude Code will not read the checkout's settings until the directory is
-# trusted, and there is nobody in a run to click a dialog -- the VM (not a
-# path inside a container) is the security boundary, same reasoning as
-# trust_dir in `room`. Recorded once here, inherited by every run.
-as_dev -- bash -c 'python3 - <<"PY"
-import json, os
-path = "/home/dev/.claude.json"
-try:
-    data = json.load(open(path))
-except Exception:
-    data = {}
-entry = data.setdefault("projects", {}).setdefault("/home/dev/app", {})
-entry["hasTrustDialogAccepted"] = True
-data["bypassPermissionsModeAccepted"] = True
-json.dump(data, open(path + ".tmp", "w"), indent=2)
-os.replace(path + ".tmp", path)
-PY' || true
+echo "==> launching template from $BASE"
+incus launch "$BASE" template >/dev/null
+wait_ready template
 
 echo "==> repo"
 push_github_token
-# The credential helper answers github.com https fetches with the pasted
-# token; identical contract to the VM's own helper.
-incus file push /usr/local/bin/git-credential-appsmoothly template/usr/local/bin/git-credential-appsmoothly \
-    --mode 0755 --quiet 2>/dev/null || true
-as_dev -- bash -c 'git config --global credential.https://github.com.helper appsmoothly' 2>/dev/null || true
 as_dev -- git clone "$URL" /home/dev/app || {
     tell "factory: could not clone $URL into the template. If it is private, paste a token with: ask-secret GITHUB_TOKEN \"to clone the project into the factory template\" and rerun template-build."
     echo "clone failed -- is a GITHUB_TOKEN needed? (ask-secret GITHUB_TOKEN ...)" >&2
@@ -229,7 +262,7 @@ as_dev -- git clone "$URL" /home/dev/app || {
 
 inject_app_files || true
 
-echo "==> toolchain + deps (this is the slow part, once)"
+echo "==> toolchain + deps (the slow part, once per project)"
 in_app "mise install" || echo "  WARN: mise install had errors" >&2
 if ! in_app "[ ! -x bin/setup ] || bin/setup" >"$LOG" 2>&1; then
     tell "factory: template built, but the repo's bin/setup failed -- the app side needs a look before runs are useful. Log tail follows."
