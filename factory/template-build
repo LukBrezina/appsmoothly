@@ -111,17 +111,21 @@ incus exec template -- bash -c '
         libvips >/dev/null
     # The image may already ship a default user at uid 1000 (ubuntu/24.04
     # does: "ubuntu"). The bridge addresses the run user by uid, so 1000 is
-    # the contract -- rename whoever holds it rather than fight for it.
-    if ! id dev >/dev/null 2>&1; then
-        existing=$(getent passwd 1000 | cut -d: -f1)
+    # the contract -- take over whoever holds it. Every step here tolerates
+    # any half-state a previous attempt left behind: no -m home move (it
+    # refuses if the target exists), ownership fixed explicitly instead.
+    if ! getent passwd dev >/dev/null; then
+        existing=$(getent passwd 1000 | cut -d: -f1 || true)
         if [ -n "$existing" ]; then
-            usermod -l dev -d /home/dev -m "$existing"
-            groupmod -n dev "$(id -gn 1000)" 2>/dev/null || true
+            usermod -l dev "$existing"
+            groupmod -n dev "$existing" 2>/dev/null || true
         else
-            useradd -m -u 1000 -s /bin/bash dev
+            useradd -u 1000 -s /bin/bash dev
         fi
     fi
-    usermod -s /bin/bash dev
+    usermod -d /home/dev -s /bin/bash dev
+    install -d /home/dev
+    chown 1000:1000 /home/dev
     echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev
     chmod 440 /etc/sudoers.d/dev
 '
