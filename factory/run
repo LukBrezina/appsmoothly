@@ -78,6 +78,11 @@ new)
     fi
     incus start "run-$NAME" 2>/dev/null || true
     for i in $(seq 1 30); do incus exec "run-$NAME" -- true 2>/dev/null && break; sleep 1; done
+    # exec answering does not mean DHCP/DNS is up, and the branch step right
+    # below starts with a git fetch -- wait for name resolution, briefly.
+    for i in $(seq 1 15); do
+        incus exec "run-$NAME" -- getent hosts github.com >/dev/null 2>&1 && break; sleep 1
+    done
 
     # The claude OAuth token is pushed per-run rather than baked into the
     # template, so a template copied or exported never carries it. Root-owned

@@ -106,7 +106,7 @@ incus exec template -- bash -c '
     set -e
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        git curl ca-certificates sudo tmux build-essential pkg-config \
+        git curl ca-certificates sudo tmux python3 build-essential pkg-config \
         libyaml-dev libssl-dev zlib1g-dev libffi-dev libpq-dev libsqlite3-dev \
         libvips >/dev/null
     # The image may already ship a default user at uid 1000 (ubuntu/24.04
@@ -132,9 +132,12 @@ incus exec template -- bash -c '
 
 echo "==> mise"
 as_dev -- bash -c 'command -v ~/.local/bin/mise >/dev/null 2>&1 || curl -fsSL https://mise.run | sh' >/dev/null
+# Shims first for ruby/node -- but ~/.local/bin goes LAST, or the raw claude
+# binary there shadows the /usr/local/bin/claude wrapper that injects the
+# OAuth token, and every claude call in a run is silently unauthenticated.
 incus exec template -- bash -c '
     cat > /etc/profile.d/mise-shims.sh <<EOF
-export PATH="\$HOME/.local/share/mise/shims:\$HOME/.local/bin:\$PATH"
+export PATH="\$HOME/.local/share/mise/shims:\$PATH:\$HOME/.local/bin"
 EOF
 '
 as_dev -- bash -lc 'mise settings set idiomatic_version_file_enable_tools ruby,node,python' >/dev/null 2>&1 || true
@@ -161,6 +164,23 @@ EOF
     install -d -m 700 /etc/claude
     echo "unset ANTHROPIC_API_KEY" > /etc/profile.d/00-anthropic-guard.sh
 '
+# Claude Code will not read the checkout's settings until the directory is
+# trusted, and there is nobody in a run to click a dialog -- the VM (not a
+# path inside a container) is the security boundary, same reasoning as
+# trust_dir in `room`. Recorded once here, inherited by every run.
+as_dev -- bash -c 'python3 - <<"PY"
+import json, os
+path = "/home/dev/.claude.json"
+try:
+    data = json.load(open(path))
+except Exception:
+    data = {}
+entry = data.setdefault("projects", {}).setdefault("/home/dev/app", {})
+entry["hasTrustDialogAccepted"] = True
+data["bypassPermissionsModeAccepted"] = True
+json.dump(data, open(path + ".tmp", "w"), indent=2)
+os.replace(path + ".tmp", path)
+PY' || true
 
 echo "==> repo"
 push_github_token
