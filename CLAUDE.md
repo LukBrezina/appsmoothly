@@ -39,6 +39,12 @@ repo's main branch, with the app runnable inside and its own preview URL:
 `run new <name>`, then `room new ... --run <name>`. Sleeping runs cost
 nothing and wake on a message. See the `factory` skill.
 
+**The project app never runs in this VM directly.** No clone under
+`projects/`, no `bin/dev` here, no watchers — the VM's four cores belong to
+the chat and the factory. Setting up a repo someone pastes IS the factory
+onboarding (see the `factory` skill): the app lives in the template and boots
+in runs, nowhere else.
+
 Two consequences that are easy to get wrong: **everything you say goes to your
 own room** — creating another room does not move you into it — and **a room
 nobody has spoken in has no session**. So open a feature room *with its work*,

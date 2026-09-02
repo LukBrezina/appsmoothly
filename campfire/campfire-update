@@ -31,10 +31,18 @@ if [ -d "$INIT" ]; then
     echo "==> initializers: $(ls "$INIT" | tr '\n' ' ')"
 fi
 
+# Upstream's Procfile runs the resque workers with INTERVAL=0.1 -- polling
+# every 100ms, which burned ~30% CPU per worker doing nothing, in every VM,
+# forever. 2s is imperceptible for chat jobs. The edit exists only for the
+# build and is reverted right after, so the checkout stays clean and the next
+# fast-forward can never conflict.
+sudo -u lukas sed -i 's/INTERVAL=0\.1/INTERVAL=2/' "$SRC/Procfile"
+
 echo "==> building image"
 # BuildKit is required: the Dockerfile uses COPY --chmod, which the legacy
 # builder rejects. Needs the docker-buildx package.
 DOCKER_BUILDKIT=1 docker build -q -t campfire:local "$SRC"
+sudo -u lukas git -C "$SRC" checkout -- Procfile 2>/dev/null || true
 echo "==> restarting"
 systemctl restart campfire
 for i in $(seq 1 40); do
