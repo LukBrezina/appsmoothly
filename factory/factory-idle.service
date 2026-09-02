@@ -1,0 +1,7 @@
+[Unit]
+Description=Put idle factory runs to sleep
+ConditionPathExists=/var/lib/factory/runs.tsv
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/idle-sleep

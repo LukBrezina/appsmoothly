@@ -33,10 +33,15 @@ preview route was wired by `run new`.
 
 ## Sleep is free, delete is forever
 
-    run sleep invoices     # stopped: 0 RAM, all state kept
+Runs sleep **by themselves**: a run with no agent activity and no open
+preview connection for ~30 minutes is stopped (all state kept, 0 RAM) and a
+note lands in #System. It wakes on a message in its room or when someone
+opens its preview URL (the visitor sees a "waking" page that reloads).
+Manual control exists too:
+
+    run sleep invoices     # stop it now
     run wake invoices      # back in seconds
 
-A message in the run's room **wakes it automatically** — sleep aggressively.
 When the PR is merged or the work abandoned:
 
     room archive "Invoice export" --purge    # removes the run + route too
@@ -86,31 +91,44 @@ to chat for you to look at. Fix main, or fix the template by hand:
 ## Cell onboarding — a fresh VM's first job
 
 There is exactly one onboarding, and it starts when the human answers your
-welcome message with a repository URL in All Talk. From that moment you make
-the cell real: confirm in one line what you are about to do, then do it — do
-not make the human drive the steps; ask only through `ask-secret` links and
-short progress notes. The goal state: template
-green, the app booting in a run, "factory ready" announced. The dance:
+welcome message with a repository URL in All Talk. You drive everything; the
+human's only job is answering secret links. Two rules shape the whole thing:
+**ask for all essentials as early as possible, batched**, and **never run the
+app in this VM** — it lives in the template and boots in runs.
 
-1. `sudo cell-init`, then `sudo systemctl restart claude-bot` if `incus`
-   was not usable before (your next session picks up the rights).
-2. `ask-secret GITHUB_TOKEN "to clone <repo> into the factory"` — needed for
-   private repos, and it also lifts GitHub's anonymous rate limits.
-3. `sudo template-build <repo-url>`. Failures land in
-   `/var/lib/factory/template.log` and in chat.
-4. Read what its setup reports, and use judgment:
-   - a missing secret file (`master.key`, `.env`) → `ask-secret` the value,
-     write it under `~/.secrets/app-files/<repo path>`, rebuild;
+1. Reply in ONE short message: what you are about to do, and immediately
+   `ask-secret GITHUB_TOKEN "to clone <repo> into the factory"` (needed for
+   private repos; also lifts GitHub's anonymous rate limits). Meanwhile run
+   `sudo cell-init` (idempotent; `sudo systemctl restart claude-bot` if incus
+   was newly installed — your next session picks up the rights).
+2. As soon as the token lands: `sudo template-build <repo-url>`.
+3. The moment the clone exists, read what the app actually needs —
+   `.env.example`, `config/credentials.yml.enc` (→ `RAILS_MASTER_KEY`),
+   `docker-compose`/README hints — and post ONE batch of `ask-secret` links
+   for all of it, so the human answers everything in one sitting instead of
+   being dripped on. Wire each value into `~/.secrets/app-files/<repo path>`.
+4. `sudo template-build` again until green. Judgment calls along the way:
    - nvm/rbenv/asdf-isms in `bin/setup` → fix the script on a branch via a
      run and open a PR (mise is the toolchain here);
    - a missing system package → install it in the template
      (`incus exec template -- apt-get install -y ...`) and say so in chat.
-5. `sudo template-build` again until green.
-6. Prove it: `run new smoke`, start the app inside, post the preview URL.
-   After the human confirms, `run rm smoke` and announce **factory ready**.
+   Failures land in `/var/lib/factory/template.log` and in chat.
+5. Prove it: `run new demo`, start the app inside the run (the repo's own
+   way: `bin/rails server -p 3000`, `bin/dev`, whatever it uses — bound to
+   127.0.0.1:3000), and **check the preview URL yourself with curl before
+   showing it**.
+6. Close with the kickoff message — one message, under ten lines:
+   - what exists now: template at latest main, refreshed automatically,
+     app boots in disposable runs;
+   - the demo preview link, and that this demo run **falls asleep by itself
+     when idle** — state kept — and **wakes on a message in its room or by
+     opening its URL** (first load then takes ~30s);
+   - what to do next: ask for features in plain words, here — each gets its
+     own room, its own run, its own preview link.
 
 From then on every feature is `run new <name>` + `room new ... --run <name>`,
-and the refresh timer owns the template.
+and the refresh timer owns the template. Keep the demo run until the first
+real feature run exists, then `run rm demo`.
 
 ## One-time cell setup
 

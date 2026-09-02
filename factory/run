@@ -126,6 +126,7 @@ CADDY
     echo "  branch : $BRANCH"
     echo "  preview: https://$NAME.<project>.appsmoothly.com  (once the app listens on :3000 inside)"
     echo "  attach a room: room set <room> --run $NAME    (or room new ... --run $NAME)"
+    echo "  sleeps by itself when idle ~30 min; wakes on a room message or a preview visit"
     ;;
 
 list)

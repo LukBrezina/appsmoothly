@@ -1,0 +1,55 @@
+#!/bin/bash
+# idle-sleep -- put factory runs to sleep when nobody is using them.
+#
+# A run is "in use" when its claude agent is doing something inside it, or
+# when something holds a connection to its preview port (an open browser tab
+# keeps its websocket up, so watching the app counts as using it). A run that
+# is idle on two consecutive ticks -- ~30 minutes -- is stopped: all state
+# kept, 0 RAM. It wakes on a message in its room (the bridge starts it) or a
+# visit to its preview URL (the 502 handler starts it).
+#
+# The template is never touched; it is stopped by template-build itself.
+# Runs the timer fires every 15 minutes; safe to run by hand.
+set -uo pipefail
+
+REG=/var/lib/factory/runs.tsv
+STRIKES=/var/lib/factory/idle.strikes    # name<TAB>count
+[ -r "$REG" ] || exit 0
+command -v incus >/dev/null 2>&1 || exit 0
+touch "$STRIKES" 2>/dev/null || exit 0
+
+get_strikes() { awk -F'\t' -v n="$1" '$1==n{print $2}' "$STRIKES" | head -1; }
+set_strikes() {
+    awk -F'\t' -v n="$1" '$1!=n' "$STRIKES" > "$STRIKES.tmp"
+    [ "$2" != 0 ] && printf '%s\t%s\n' "$1" "$2" >> "$STRIKES.tmp"
+    mv "$STRIKES.tmp" "$STRIKES"
+}
+
+tell() { sudo -u lukas /usr/local/bin/notify "$1" >/dev/null 2>&1 || true; }
+
+while IFS=$'\t' read -r name port _branch; do
+    [ -n "$name" ] || continue
+    S=$(incus list "run-$name" --format csv -c s 2>/dev/null | head -1)
+    [ "$S" = "RUNNING" ] || { set_strikes "$name" 0; continue; }
+
+    busy=""
+    # The agent is working inside it.
+    incus exec "run-$name" -- pgrep -u 1000 -f claude >/dev/null 2>&1 && busy=agent
+    # Someone is connected to the preview (an open tab holds its websocket).
+    [ -z "$busy" ] && ss -Htn state established "( sport = :$port )" 2>/dev/null | grep -q . && busy=viewer
+
+    if [ -n "$busy" ]; then
+        set_strikes "$name" 0
+        continue
+    fi
+
+    N=$(( $(get_strikes "$name" 2>/dev/null || echo 0) + 1 ))
+    if [ "$N" -ge 2 ]; then
+        incus stop "run-$name" 2>/dev/null || incus stop "run-$name" --force 2>/dev/null
+        set_strikes "$name" 0
+        echo "run-$name asleep (idle)"
+        tell "run-$name fell asleep after being idle -- state kept, 0 RAM. A message in its room or opening its preview URL wakes it."
+    else
+        set_strikes "$name" "$N"
+    fi
+done < "$REG"

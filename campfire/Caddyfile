@@ -27,4 +27,14 @@
 			header_up X-Forwarded-Proto https
 		}
 	}
+
+	# A 502 means the upstream is not listening -- for a run's preview host
+	# that means the run is ASLEEP. The bridge answers with a page that wakes
+	# it, so opening a preview URL is all it takes.
+	handle_errors {
+		@dead expression {err.status_code} == 502
+		handle @dead {
+			reverse_proxy 172.17.0.1:4488
+		}
+	}
 }

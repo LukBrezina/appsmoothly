@@ -66,19 +66,21 @@ echo "==> factory"
 FSRC="$REPO/factory"
 if [ -d "$FSRC" ]; then
     put 755 "$FSRC/run" /usr/local/bin/run || true
-    for f in cell-init template-build; do
+    for f in cell-init template-build idle-sleep; do
         put 755 "$FSRC/$f" "/usr/local/sbin/$f" || true
     done
     for f in "$FSRC"/*.service "$FSRC"/*.timer; do
         [ -e "$f" ] || continue
         put 644 "$f" "/etc/systemd/system/$(basename "$f")" && units_changed=1
     done
-    if [ -f /etc/systemd/system/template-refresh.timer ] &&
-       ! systemctl is-enabled template-refresh.timer >/dev/null 2>&1; then
-        systemctl daemon-reload
-        systemctl enable --now template-refresh.timer >/dev/null 2>&1 || true
-        echo "  template-refresh.timer enabled (inert until this VM becomes a cell)"
-    fi
+    for t in template-refresh.timer factory-idle.timer; do
+        if [ -f "/etc/systemd/system/$t" ] &&
+           ! systemctl is-enabled "$t" >/dev/null 2>&1; then
+            systemctl daemon-reload
+            systemctl enable --now "$t" >/dev/null 2>&1 || true
+            echo "  $t enabled (inert until this VM becomes a cell)"
+        fi
+    done
 fi
 
 echo "==> units"
