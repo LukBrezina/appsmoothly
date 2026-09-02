@@ -165,7 +165,9 @@ rm)
     NAME="${1:?usage: run rm <name>}"
     incus delete "run-$NAME" --force 2>/dev/null || true
     sudo -n rm -f "$ROUTES/run-$NAME.caddy" && reload_caddy
-    grep -vP "^\Q$NAME\E\t" "$REG" > "$REG.tmp" 2>/dev/null && mv "$REG.tmp" "$REG" || true
+    # Not grep -v: it exits 1 when the result is empty (deleting the last
+    # run), which under `set -e` left the record behind. awk always exits 0.
+    awk -F'\t' -v n="$NAME" '$1!=n' "$REG" > "$REG.tmp" && mv "$REG.tmp" "$REG"
     echo "run-$NAME deleted (branch and PR live on in git; the container is gone)"
     ;;
 
