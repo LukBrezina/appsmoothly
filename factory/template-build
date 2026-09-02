@@ -110,8 +110,19 @@ EOF
     as_dev_in base-builder -- bash -lc 'mise settings set idiomatic_version_file_enable_tools ruby,node,python' >/dev/null 2>&1 || true
 
     echo "  claude"
-    as_dev_in base-builder -- bash -c 'command -v ~/.local/bin/claude >/dev/null 2>&1 || curl -fsSL https://claude.ai/install.sh | bash' >/dev/null 2>&1 \
-        || echo "  WARN: claude install failed; rerun later inside the container"
+    # A base without claude produces runs whose rooms die with exit 127 --
+    # this happened, silently, behind a >/dev/null. Retry, then VERIFY, and
+    # fail the whole base build rather than bake a broken image.
+    as_dev_in base-builder -- bash -c '
+        for i in 1 2 3; do
+            curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 && break
+            sleep 5
+        done
+        test -x /home/dev/.local/bin/claude' || {
+        echo "claude install failed three times; not publishing a broken base" >&2
+        incus delete base-builder --force
+        exit 1
+    }
     # Same wrapper contract as the VM: the OAuth token lives root-owned in
     # /etc/claude (pushed per-run, never baked in) and ANTHROPIC_API_KEY must
     # never override it.
