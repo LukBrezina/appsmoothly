@@ -70,6 +70,12 @@ ensure_base() {
     echo "  base system"
     incus exec base-builder -- bash -c '
         set -e
+        # The stock image runs cloud-init on every first boot of every copy;
+        # it re-provisions the default user and stomped /home/dev in images
+        # published from booted containers (claude, mise and the brief all
+        # vanished). This image is configured by THIS script, once -- nothing
+        # may re-provision it later.
+        touch /etc/cloud/cloud-init.disabled 2>/dev/null || true
         apt-get update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
             git gh curl ca-certificates sudo tmux python3 build-essential pkg-config \
@@ -203,10 +209,30 @@ EOF'
         --mode 0755 --quiet 2>/dev/null || true
     as_dev_in base-builder -- bash -c 'git config --global credential.https://github.com.helper appsmoothly' 2>/dev/null || true
 
+    # Verify every piece before publishing -- a base missing any of these
+    # produces runs that fail in confusing ways much later. Fail loudly now.
+    for check in \
+        "/home/dev/.local/bin/claude" \
+        "/home/dev/.local/bin/mise" \
+        "/home/dev/.claude/CLAUDE.md" \
+        "/usr/local/bin/claude" \
+        "/etc/profile.d/mise-shims.sh"; do
+        incus exec base-builder -- test -e "$check" || {
+            echo "base verification failed: $check missing; not publishing" >&2
+            incus delete base-builder --force
+            exit 1
+        }
+    done
+    incus exec base-builder -- bash -c 'grep -q hasTrustDialogAccepted /home/dev/.claude.json' || {
+        echo "base verification failed: trust not recorded; not publishing" >&2
+        incus delete base-builder --force
+        exit 1
+    }
+
     incus stop base-builder
-    incus publish base-builder --alias "$BASE" --quiet >/dev/null
+    incus publish base-builder --alias "$BASE" --reuse --quiet >/dev/null
     incus delete base-builder
-    echo "  $BASE published"
+    echo "  $BASE published (verified)"
 }
 
 if [ "${1:-}" = "--base-only" ]; then
