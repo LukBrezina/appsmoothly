@@ -10,6 +10,8 @@ ExecStartPre=-/usr/bin/docker rm -f campfire
 ExecStart=/usr/bin/docker run --rm --name campfire \
     -p 127.0.0.1:8080:80 \
     -v campfire:/rails/storage \
+    -v /var/lib/campfire-init:/appsmoothly-state:ro \
+    -v /etc/appsmoothly:/etc/appsmoothly:ro \
     -e SECRET_KEY_BASE \
     -e VAPID_PRIVATE_KEY \
     -e VAPID_PUBLIC_KEY \
