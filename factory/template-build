@@ -88,6 +88,11 @@ if incus info template >/dev/null 2>&1; then
     WAS_RUNNING=$(incus list template --format csv -c s)
     [ "$WAS_RUNNING" = "RUNNING" ] || incus start template
     for i in $(seq 1 30); do as_dev -- true 2>/dev/null && break; sleep 1; done
+    # Same race as in `run new`: exec answers before DHCP/DNS is up, and the
+    # first thing this path does is a git pull.
+    for i in $(seq 1 20); do
+        incus exec template -- getent hosts github.com >/dev/null 2>&1 && break; sleep 1
+    done
 
     push_github_token
     # The template never leaves the clone's default branch (main, master,
