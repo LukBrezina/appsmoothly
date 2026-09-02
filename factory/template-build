@@ -114,7 +114,7 @@ if incus info template >/dev/null 2>&1; then
     echo "template: ${HEAD:0:7} -> ${AFTER:0:7}$([ "$FILES" = 0 ] && echo ' + app files')"
     {
         in_app "mise install --quiet" &&
-        in_app "[ -x bin/setup ] && bin/setup || true"
+        in_app "[ ! -x bin/setup ] || bin/setup"
     } >"$LOG" 2>&1 || {
         tell "factory: template refresh to ${AFTER:0:7} pulled, but deps/setup failed -- see $LOG on the cell. New runs will carry that state until main (or the template) is fixed."
         echo "refresh setup failed at ${AFTER:0:7} (log: $LOG)" >&2
@@ -231,7 +231,7 @@ inject_app_files || true
 
 echo "==> toolchain + deps (this is the slow part, once)"
 in_app "mise install" || echo "  WARN: mise install had errors" >&2
-if ! in_app "[ -x bin/setup ] && bin/setup || true" >"$LOG" 2>&1; then
+if ! in_app "[ ! -x bin/setup ] || bin/setup" >"$LOG" 2>&1; then
     tell "factory: template built, but the repo's bin/setup failed -- the app side needs a look before runs are useful. Log tail follows."
     tail -5 "$LOG" | while read -r l; do tell "  $l"; done
     echo "  WARN: bin/setup failed (log: $LOG) -- template usable for code work, app may need attention" >&2
