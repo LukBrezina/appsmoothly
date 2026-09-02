@@ -20,7 +20,11 @@ chmod 600 /etc/campfire/env
 # The bridge secret is needed now so the webhook URL is stable once the bot is
 # created later.
 openssl rand -hex 16 > "$STATE/bridge-secret"
-chmod 600 "$STATE/bridge-secret"
+# Read by the Campfire container's unprivileged app user through a ro bind
+# mount -- the first-run initializer needs it to create the bot. The VM is
+# the security boundary in here, not file modes: everyone in this VM already
+# has passwordless sudo.
+chmod 444 "$STATE/bridge-secret"
 
 echo "==> starting campfire"
 systemctl start campfire
