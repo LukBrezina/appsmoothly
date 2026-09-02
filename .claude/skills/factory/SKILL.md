@@ -83,6 +83,32 @@ on its last good state, new runs start from there, and the failure is posted
 to chat for you to look at. Fix main, or fix the template by hand:
 `incus exec template -- ...`.
 
+## Cell onboarding — a fresh VM's first job
+
+When the first message in All Talk is a setup brief naming a repo, this cell
+is brand new and you are the one who makes it real. The goal state: template
+green, the app booting in a run, "factory ready" announced. The dance:
+
+1. `sudo cell-init`, then `sudo systemctl restart claude-bot` if `incus`
+   was not usable before (your next session picks up the rights).
+2. `ask-secret GITHUB_TOKEN "to clone <repo> into the factory"` — needed for
+   private repos, and it also lifts GitHub's anonymous rate limits.
+3. `sudo template-build <repo-url>`. Failures land in
+   `/var/lib/factory/template.log` and in chat.
+4. Read what its setup reports, and use judgment:
+   - a missing secret file (`master.key`, `.env`) → `ask-secret` the value,
+     write it under `~/.secrets/app-files/<repo path>`, rebuild;
+   - nvm/rbenv/asdf-isms in `bin/setup` → fix the script on a branch via a
+     run and open a PR (mise is the toolchain here);
+   - a missing system package → install it in the template
+     (`incus exec template -- apt-get install -y ...`) and say so in chat.
+5. `sudo template-build` again until green.
+6. Prove it: `run new smoke`, start the app inside, post the preview URL.
+   After the human confirms, `run rm smoke` and announce **factory ready**.
+
+From then on every feature is `run new <name>` + `room new ... --run <name>`,
+and the refresh timer owns the template.
+
 ## One-time cell setup
 
     sudo cell-init                          # incus + btrfs pool + fixed bridge

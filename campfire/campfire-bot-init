@@ -117,6 +117,34 @@ docker exec campfire bin/rails runner '
   end
 ' >/dev/null 2>&1 && echo "  rooms: All Talk (open, watched) + System"
 
+# The setup brief. If the VM was told which repo it exists for (newproj
+# --repo writes /etc/appsmoothly/repo-url), the human's very first sight of
+# the chat is the bot already getting the app running -- not an empty room.
+# Posted AS THE HUMAN and delivered to the bot, the same way `room new
+# --brief` hands work over: that is what starts the bot's session. The bot
+# asks for secrets with ask-secret links as it needs them; the human's whole
+# job is to answer those.
+REPO_URL_FILE=/etc/appsmoothly/repo-url
+if [ -r "$REPO_URL_FILE" ]; then
+    REPO_URL=$(tr -d '\r\n' < "$REPO_URL_FILE")
+    docker exec -e SETUP_REPO="$REPO_URL" campfire bin/rails runner '
+      user = User.where.not(role: :bot).order(:id).first
+      bot  = User.active_bots.order(:id).first
+      main = Room.where(name: "All Talk").where.not(type: "Rooms::Direct").order(:id).first
+      if user && bot && main
+        Current.user = user
+        repo = ERB::Util.html_escape(ENV["SETUP_REPO"])
+        body = "This cell exists to serve <code>#{repo}</code>. " \
+               "Set it up: follow the <strong>factory</strong> skill'"'"'s onboarding section -- " \
+               "get the template built from that repo, fix what its setup reports, " \
+               "and finish by booting the app in a smoke run with a preview link. " \
+               "Ask for any secrets with ask-secret; I will answer the links as they arrive."
+        msg = main.messages.create!(creator: user, body: body)
+        bot.deliver_webhook_later(msg)
+      end
+    ' >/dev/null 2>&1 && echo "  setup brief posted to All Talk"
+fi
+
 touch "$STATE/bot-done"
 systemctl disable --now campfire-bot-init.timer 2>/dev/null || true
 echo "Claude bot created and bridge started"
