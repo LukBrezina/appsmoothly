@@ -8,9 +8,16 @@ SRC=/home/appsmoothly/projects/once-campfire
 [ -d "$SRC/.git" ] || { echo "no checkout at $SRC" >&2; exit 1; }
 
 echo "==> fetching upstream"
-sudo -u lukas git -C "$SRC" fetch --quiet origin
 BEFORE=$(sudo -u lukas git -C "$SRC" rev-parse HEAD)
-sudo -u lukas git -C "$SRC" merge --ff-only origin/main
+# GitHub rate-limits anonymous https from a busy egress IP now and then; an
+# unreachable upstream must not block a rebuild of the source we already
+# have -- that is exactly the situation --force exists for.
+if sudo -u lukas git -C "$SRC" fetch --quiet origin 2>/dev/null; then
+    sudo -u lukas git -C "$SRC" merge --ff-only origin/main ||
+        echo "  WARN: could not fast-forward; building from the current checkout" >&2
+else
+    echo "  WARN: fetch failed (offline or rate-limited); building from the current checkout" >&2
+fi
 AFTER=$(sudo -u lukas git -C "$SRC" rev-parse HEAD)
 
 if [ "$BEFORE" = "$AFTER" ]; then
