@@ -122,9 +122,19 @@ CADDY
         reload_caddy
     fi
 
+    # The container has no way to learn its public address by itself -- the
+    # VM's hostname is the project name, so compute the URL here and hand it
+    # in as environment, or the agent inside cannot produce a working link.
+    PREVIEW_URL="https://$NAME.$(hostname).appsmoothly.com"
+    incus exec "run-$NAME" -- bash -c "cat > /etc/profile.d/run-info.sh <<EOF
+export RUN_NAME=$NAME
+export RUN_BRANCH=$BRANCH
+export PREVIEW_URL=$PREVIEW_URL
+EOF" 2>/dev/null || true
+
     echo "run-$NAME ready"
     echo "  branch : $BRANCH"
-    echo "  preview: https://$NAME.<project>.appsmoothly.com  (once the app listens on :3000 inside)"
+    echo "  preview: $PREVIEW_URL  (once the app listens on :3000 inside)"
     echo "  attach a room: room set <room> --run $NAME    (or room new ... --run $NAME)"
     echo "  sleeps by itself when idle ~30 min; wakes on a room message or a preview visit"
     ;;

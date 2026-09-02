@@ -182,7 +182,8 @@ installed. Messages reach you from the project'"'"'s chat; keep replies short
   fresh clones -- this container IS the isolation; there is nothing to
   protect from yourself.
 - Serve the app on 127.0.0.1:3000; that port is already wired to this
-  run'"'"'s public preview URL.
+  run'"'"'s public preview URL -- the exact address is in \$PREVIEW_URL
+  (bash -lc "echo \$PREVIEW_URL" if your shell does not have it).
 - Commit and push as you go (the GitHub token is wired via the credential
   helper); open a PR when the work is ready.
 - sudo works and the container is disposable: be bold in here, careful in

@@ -33,6 +33,7 @@ import html
 import json
 import os
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -231,6 +232,8 @@ class Session:
                 # look absent inside the run.
                 "--env", "SHELL=/bin/bash",
                 "--env", "USER=dev",
+                "--env", f"PREVIEW_URL=https://{run.removeprefix('run-')}."
+                         f"{socket.gethostname()}.appsmoothly.com",
                 "--env", f"CAMPFIRE_ROOM_PATH={self.room_path}",
                 "--env", f"CAMPFIRE_ROOM_NAME={self.room_name}",
                 "--env", f"CAMPFIRE_BASE={RUN_CAMPFIRE_BASE}",
