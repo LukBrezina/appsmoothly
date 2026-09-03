@@ -258,7 +258,9 @@ EOF'
     }
 
     incus stop base-builder
-    incus publish base-builder --alias "$BASE" --reuse --quiet >/dev/null
+    # --compression none: this image never leaves the machine, and xz-ing
+    # ~3GB (Chrome included) inside a loaded VM took 20+ minutes for nothing.
+    incus publish base-builder --alias "$BASE" --reuse --compression none --quiet >/dev/null
     incus delete base-builder
     echo "  $BASE published (verified)"
 }
