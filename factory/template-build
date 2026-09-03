@@ -85,6 +85,13 @@ ensure_base() {
         cat > /etc/profile.d/gh-token.sh <<"EOF"
 [ -r "$HOME/.secrets/GITHUB_TOKEN" ] && export GH_TOKEN="$(cat "$HOME/.secrets/GITHUB_TOKEN")"
 EOF
+        # Agents drive a browser constantly (screenshots, testing the UI they
+        # just changed) -- ship Chrome instead of making every run install
+        # one. Playwright and puppeteer both use it via channel/executable.
+        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq google-chrome-stable fonts-liberation >/dev/null
         # The image may already ship a default user at uid 1000 (ubuntu/24.04
         # does: "ubuntu"). The bridge addresses the run user by uid, so 1000
         # is the contract -- take over whoever holds it. Every step tolerates
@@ -222,6 +229,7 @@ EOF'
         "/home/dev/.local/bin/mise" \
         "/home/dev/.claude/CLAUDE.md" \
         "/usr/local/bin/claude" \
+        "/usr/bin/google-chrome-stable" \
         "/etc/profile.d/mise-shims.sh"; do
         incus exec base-builder -- test -e "$check" || {
             echo "base verification failed: $check missing; not publishing" >&2
