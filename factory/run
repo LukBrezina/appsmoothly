@@ -126,10 +126,13 @@ CADDY
     # VM's hostname is the project name, so compute the URL here and hand it
     # in as environment, or the agent inside cannot produce a working link.
     PREVIEW_URL="https://$NAME.$(hostname).appsmoothly.com"
+    # RAILS_DEVELOPMENT_HOSTS spares every repo a config.hosts patch for the
+    # preview hostname -- Rails reads it natively in development.
     incus exec "run-$NAME" -- bash -c "cat > /etc/profile.d/run-info.sh <<EOF
 export RUN_NAME=$NAME
 export RUN_BRANCH=$BRANCH
 export PREVIEW_URL=$PREVIEW_URL
+export RAILS_DEVELOPMENT_HOSTS=.appsmoothly.com
 EOF" 2>/dev/null || true
 
     echo "run-$NAME ready"

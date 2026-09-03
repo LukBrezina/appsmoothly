@@ -27,8 +27,9 @@ container, working in `/home/dev/app` on branch `invoices`. The VM around it
 is untouched.
 
 Inside a run you are user `dev` with passwordless sudo. Install what the task
-needs; the container is disposable. Start the app on **127.0.0.1:3000** inside
-the run and it is already reachable at `https://invoices.<project>...` — the
+needs; the container is disposable. Start the app on **0.0.0.0:3000** inside
+the run (the proxy dials the container's bridge address, and the
+container is the boundary) and it is already reachable at `https://invoices.<project>...` — the
 preview route was wired by `run new`.
 
 ## Sleep is free, delete is forever
@@ -144,7 +145,7 @@ nothing about the factory is visible outside it.
 
 - Runs are containers **inside** this VM: strong enough walls between pieces
   of work, but the VM is still the real security boundary.
-- The preview route assumes the app listens on `127.0.0.1:3000` *inside the
-  run*. A different port needs its own route file (see deploy-previews).
+- The preview route assumes the app listens on `0.0.0.0:3000` *inside the
+  run* -- a loopback bind refuses the proxy. A different port needs its own route file (see deploy-previews).
 - `run list` is the inventory. If a run shows MISSING, its container was
   deleted outside `run rm` — clean the record with `run rm <name>`.

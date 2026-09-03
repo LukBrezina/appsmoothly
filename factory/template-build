@@ -187,9 +187,15 @@ installed. Messages reach you from the project'"'"'s chat; keep replies short
 - Work directly in /home/dev/app on the current branch. NO worktrees, no
   fresh clones -- this container IS the isolation; there is nothing to
   protect from yourself.
-- Serve the app on 127.0.0.1:3000; that port is already wired to this
+- Serve the app on 0.0.0.0:3000 -- the proxy dials the container'"'"'s
+  bridge address, so a loopback bind refuses it. The container is the
+  boundary; nothing outside this VM can reach the port anyway. It is
+  wired to this
   run'"'"'s public preview URL -- the exact address is in \$PREVIEW_URL
   (bash -lc "echo \$PREVIEW_URL" if your shell does not have it).
+- Rails HostAuthorization: RAILS_DEVELOPMENT_HOSTS=.appsmoothly.com is
+  already exported (profile.d), so the preview hostname passes with no
+  config.hosts change -- keep such patches out of PRs.
 - A foreground process DIES WITH YOUR TURN, and this container sleeps and
   wakes -- so the server must run as a systemd unit you write: find how
   the repo starts (bin/dev, bin/rails server, foreman, ...), wrap exactly
