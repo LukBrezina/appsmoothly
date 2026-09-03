@@ -237,6 +237,31 @@ EOF'
         --mode 0755 --quiet 2>/dev/null || true
     as_dev_in base-builder -- bash -c 'git config --global credential.https://github.com.helper appsmoothly' 2>/dev/null || true
 
+    # /home/dev content survives INTO the published tarball but vanishes
+    # from copies at first boot -- an empty /home/dev appears with a fresh
+    # timestamp while system paths survive. Cause never pinned down
+    # (cloud-init was purged and it still happened), so the payload is made
+    # mechanism-proof: a copy lives in /opt/factory-home and a oneshot unit
+    # restores it whenever it is missing.
+    incus exec base-builder -- bash -c '
+        rm -rf /opt/factory-home
+        cp -a /home/dev /opt/factory-home
+        cat > /etc/systemd/system/factory-home.service <<"EOF"
+[Unit]
+Description=Restore /home/dev payload (copies lose it on first boot)
+ConditionPathExists=!/home/dev/.local/bin/mise
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c "cp -a /opt/factory-home/. /home/dev/ && chown -R 1000:1000 /home/dev"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl enable factory-home.service >/dev/null 2>&1
+    '
+
     # Verify every piece before publishing -- a base missing any of these
     # produces runs that fail in confusing ways much later. Fail loudly now.
     for check in \
@@ -264,6 +289,27 @@ EOF'
     incus publish base-builder --alias "$BASE" --reuse --compression none --quiet >/dev/null
     incus delete base-builder
     echo "  $BASE published (verified)"
+
+    # The home-wipe class of bug only ever shows on COPIES, never in the
+    # builder -- so the build is not done until a copy of the published
+    # image proves it kept its home. A base that fails this is deleted.
+    echo "  probing a copy"
+    incus delete base-probe --force 2>/dev/null || true
+    incus launch "$BASE" base-probe >/dev/null
+    for i in $(seq 1 30); do
+        incus exec base-probe -- test -e /home/dev/.local/bin/mise 2>/dev/null && break
+        sleep 2
+    done
+    if ! incus exec base-probe -- test -e /home/dev/.local/bin/mise ||
+       ! incus exec base-probe -- test -e /home/dev/.claude/CLAUDE.md ||
+       ! incus exec base-probe -- test -e /home/dev/.local/bin/claude; then
+        echo "copy probe FAILED: /home/dev did not survive in a copy; deleting this base" >&2
+        incus delete base-probe --force 2>/dev/null || true
+        incus image delete "$BASE"
+        exit 1
+    fi
+    incus delete base-probe --force
+    echo "  copy probe passed"
 }
 
 if [ "${1:-}" = "--base-only" ]; then
