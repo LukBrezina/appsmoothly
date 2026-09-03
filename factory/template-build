@@ -84,12 +84,13 @@ ensure_base() {
     echo "  base system"
     incus exec base-builder -- bash -c '
         set -e
-        # The stock image runs cloud-init on every first boot of every copy;
-        # it re-provisions the default user and stomped /home/dev in images
-        # published from booted containers (claude, mise and the brief all
-        # vanished). This image is configured by THIS script, once -- nothing
-        # may re-provision it later.
-        touch /etc/cloud/cloud-init.disabled 2>/dev/null || true
+        # cloud-init re-provisions /home/dev on the first boot of every copy
+        # EVEN with /etc/cloud/cloud-init.disabled in place -- twice now an
+        # image published from a booted container came up without mise,
+        # claude or the brief. A factory container has no use for cloud-init
+        # at all: remove the package and its state outright.
+        DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq cloud-init >/dev/null 2>&1 || true
+        rm -rf /var/lib/cloud
         apt-get update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
             git gh curl ca-certificates sudo tmux python3 build-essential pkg-config \

@@ -127,12 +127,18 @@ CADDY
     # in as environment, or the agent inside cannot produce a working link.
     PREVIEW_URL="https://$NAME.$(hostname).appsmoothly.com"
     # RAILS_DEVELOPMENT_HOSTS spares every repo a config.hosts patch for the
-    # preview hostname -- Rails reads it natively in development.
+    # preview hostname -- Rails reads it natively in development. Rails'
+    # HostAuthorization only matches ONE subdomain label against a
+    # leading-dot pattern (SUBDOMAIN_REGEX has no repeat quantifier), so
+    # ".appsmoothly.com" does not cover a two-label preview host like
+    # "$NAME.$(hostname).appsmoothly.com" -- it must be scoped to this
+    # project's own subdomain instead. (Found and fixed by the aoz cell's
+    # own agent, which watched its previews 403.)
     incus exec "run-$NAME" -- bash -c "cat > /etc/profile.d/run-info.sh <<EOF
 export RUN_NAME=$NAME
 export RUN_BRANCH=$BRANCH
 export PREVIEW_URL=$PREVIEW_URL
-export RAILS_DEVELOPMENT_HOSTS=.appsmoothly.com
+export RAILS_DEVELOPMENT_HOSTS=.$(hostname).appsmoothly.com
 EOF" 2>/dev/null || true
 
     echo "run-$NAME ready"
