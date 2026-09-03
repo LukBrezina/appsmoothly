@@ -36,6 +36,20 @@ set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "template-build: run as root" >&2; exit 1; }
 command -v incus >/dev/null 2>&1 || { echo "template-build: no incus -- run cell-init first" >&2; exit 1; }
 
+# Exactly one template-build at a time. The refresh timer once fired during
+# onboarding and its cleanup (`incus delete base-builder --force`) killed the
+# base build mid-apt. The lock is non-blocking: a second invocation says so
+# and leaves, instead of queueing surprises behind a 15-minute build.
+mkdir -p /var/lib/factory 2>/dev/null || true
+exec 9>/var/lib/factory/.lock
+flock -n 9 || { echo "another template-build is already running -- try again when it finishes"; exit 0; }
+
+# --refresh-only is what the timer passes: refresh an EXISTING template
+# (cheap fetch; pull+setup only on a change) and never start a build --
+# building is an explicit act, not a timer's.
+REFRESH_ONLY=0
+[ "${1:-}" = "--refresh-only" ] && { REFRESH_ONLY=1; shift || true; }
+
 STATE=/var/lib/factory
 URL_FILE="$STATE/repo-url"
 LOG="$STATE/template.log"
@@ -335,6 +349,9 @@ if incus info template >/dev/null 2>&1; then
 fi
 
 # ------------------------------------------------------------------ build ---
+if [ "$REFRESH_ONLY" = 1 ]; then
+    exit 0   # no template yet; nothing for a timer to do
+fi
 ensure_base
 
 echo "==> launching template from $BASE"

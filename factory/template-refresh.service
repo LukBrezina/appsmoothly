@@ -6,4 +6,4 @@ ConditionPathExists=/var/lib/factory/repo-url
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/template-build
+ExecStart=/usr/local/sbin/template-build --refresh-only
