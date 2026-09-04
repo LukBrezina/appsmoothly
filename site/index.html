@@ -1,0 +1,103 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AppSmoothly</title><meta name="description" content="Every project gets its own AI development cell: a chat with an agent that codes, and disposable sandboxes where each feature runs on its own live URL.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+</head><body><style>
+:root{
+  --bg:#f5f7f6; --surface:#ffffff; --ink:#16211b; --muted:#5c6963;
+  --line:#d8ded9; --green:#1e7a4f; --green-tint:#e7f2ec; --amber:#996f1f;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111614; --surface:#1a211d; --ink:#e5ebe7; --muted:#93a199;
+    --line:#2b342f; --green:#4cc98a; --green-tint:#1c2f25; --amber:#d9a94a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111614; --surface:#1a211d; --ink:#e5ebe7; --muted:#93a199;
+  --line:#2b342f; --green:#4cc98a; --green-tint:#1c2f25; --amber:#d9a94a;
+}
+*{box-sizing:border-box}
+body{background:var(--bg); color:var(--ink); margin:0;
+  font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:17px; line-height:1.6}
+.wrap{max-width:680px; margin:0 auto; padding:64px 24px 80px}
+.mono{font-family:"IBM Plex Mono",monospace}
+.brand{font-family:"IBM Plex Mono",monospace; font-size:13px; font-weight:600;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--green); margin:0 0 40px}
+h1{font-size:clamp(30px,6vw,42px); line-height:1.12; font-weight:700;
+  letter-spacing:-.02em; margin:0 0 16px; text-wrap:balance}
+.lede{font-size:19px; color:var(--muted); margin:0 0 40px; max-width:36rem}
+.lede strong{color:var(--ink); font-weight:600}
+
+.chat{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:20px 20px 16px; margin:0 0 56px; display:flex; flex-direction:column; gap:12px}
+.msg{max-width:88%; padding:9px 14px; border-radius:10px; font-size:15px; line-height:1.45}
+.you{align-self:flex-end; background:var(--green); color:#fff; border-bottom-right-radius:3px}
+.bot{align-self:flex-start; background:var(--green-tint); border:1px solid var(--line);
+  border-bottom-left-radius:3px}
+.bot .mono{font-size:13px; color:var(--green); font-weight:600}
+.chat .tag{align-self:flex-start; font-family:"IBM Plex Mono",monospace; font-size:11px;
+  color:var(--muted); letter-spacing:.08em; text-transform:uppercase; padding:0 2px}
+
+h2{font-family:"IBM Plex Mono",monospace; font-size:13px; font-weight:600;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--green); margin:0 0 18px}
+ol.steps{list-style:none; margin:0 0 56px; padding:0; counter-reset:s}
+ol.steps li{counter-increment:s; display:flex; gap:16px; padding:10px 0; align-items:baseline}
+ol.steps li::before{content:counter(s,decimal-leading-zero);
+  font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--green); font-weight:600}
+ol.steps b{font-weight:600}
+
+.strengths{display:grid; grid-template-columns:1fr 1fr; gap:14px 28px; margin:0 0 64px; padding:0; list-style:none}
+.strengths li{font-size:15.5px; padding-left:18px; position:relative; color:var(--muted)}
+.strengths li::before{content:""; position:absolute; left:0; top:.55em; width:8px; height:8px;
+  border-radius:2px; background:var(--green)}
+.strengths li b{color:var(--ink); font-weight:600}
+@media (max-width:560px){.strengths{grid-template-columns:1fr}}
+
+.sleep{font-size:14px; color:var(--amber); font-family:"IBM Plex Mono",monospace; margin:-40px 0 64px}
+
+footer{border-top:1px solid var(--line); padding-top:20px; font-size:14px; color:var(--muted);
+  display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px}
+footer a{color:var(--green); text-decoration:none}
+footer a:hover{text-decoration:underline}
+</style>
+
+<div class="wrap">
+<p class="brand">AppSmoothly</p>
+
+<h1>A chat where your features get built.</h1>
+<p class="lede">Every project gets its own <strong>development cell</strong>: a private chat
+with an agent that codes, and disposable sandboxes where each feature runs
+on its own live URL — branch, preview, pull request included.</p>
+
+<div class="chat" role="img" aria-label="Example chat: the owner asks for a feature, the agent replies with a running preview and a pull request.">
+  <span class="tag">#All Talk</span>
+  <div class="msg you">Shorten the sign-in button to “Anmelden”.</div>
+  <div class="msg bot">Done — running at <span class="mono">signin-button.yourapp.appsmoothly.com</span>,
+  opened <span class="mono">PR&nbsp;#388</span>. The sandbox sleeps when you’re not looking.</div>
+</div>
+
+<h2>How it works</h2>
+<ol class="steps">
+  <li><span><b>Paste a repo URL</b> into your project’s chat. The agent sets everything up
+  and asks for secrets through one-time links — never through the chat itself.</span></li>
+  <li><span><b>Ask for features in plain words</b> — from your laptop or your phone.
+  Each one gets its own room, its own sandbox, its own preview link.</span></li>
+  <li><span><b>Click the preview, merge the PR.</b> The sandbox disappears;
+  the next one boots from your latest main in seconds.</span></li>
+</ol>
+
+<h2>Why it holds up</h2>
+<ul class="strengths">
+  <li><b>One project, one VM.</b> Hard isolation, snapshotted daily, disposable by design.</li>
+  <li><b>Previews that sleep.</b> Idle sandboxes freeze to nothing and wake the moment you visit.</li>
+  <li><b>Always current.</b> The build template tracks your main branch on its own.</li>
+  <li><b>Secrets stay secrets.</b> Tokens and keys travel by one-time link, never in a transcript.</li>
+  <li><b>Boring parts, on purpose.</b> Git, systemd, containers, Campfire — everything inspectable, ssh always one hop away.</li>
+</ul>
+<p class="sleep">zzz… a sleeping preview costs nothing. Visiting it is the alarm clock.</p>
+
+<footer>
+  <span>Built by Lukáš — one machine, many projects.</span>
+  <a href="https://github.com/LukBrezina/appsmoothly">github.com/LukBrezina/appsmoothly</a>
+</footer>
+</div>
+</body></html>
