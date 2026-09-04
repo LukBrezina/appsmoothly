@@ -116,10 +116,14 @@ app in this VM** — it lives in the template and boots in runs.
    - a missing system package → install it in the template
      (`incus exec template -- apt-get install -y ...`) and say so in chat.
    Failures land in `/var/lib/factory/template.log` and in chat.
-5. Prove it: `run new demo`, start the app inside the run (the repo's own
-   way: `bin/rails server -p 3000`, `bin/dev`, whatever it uses — bound to
-   127.0.0.1:3000), and **check the preview URL yourself with curl before
-   showing it**.
+5. Prove it: `run new demo`, start the app inside the run as a systemd
+   unit (wrap the repo's own start — `bin/dev`, `bin/rails server`,
+   whatever — bound to 0.0.0.0:3000), then prove it THREE ways before
+   showing it: the unit is `enabled` and `active`; a NEW shell command
+   (after the one that started it) still gets the app; and the preview
+   URL returns the app's real content — `curl $PREVIEW_URL | grep` for a
+   string from the page, never just the status code (the waking page has
+   a status of its own and fooled everyone once).
 6. Close with the kickoff message — one message, under ten lines:
    - what exists now: template at latest main, refreshed automatically,
      app boots in disposable runs;

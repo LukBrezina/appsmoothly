@@ -482,9 +482,18 @@ class Handler(BaseHTTPRequestHandler):
             if label and re.fullmatch(r"[a-z0-9][a-z0-9-]*", label) and label in _known_runs():
                 wake_run(f"run-{label}")
                 log(f"waking run-{label} (preview visit)")
-                self._html(200, _page(f"Waking {label}",
+                # 503, NOT 200: this page once answered 200 and every
+                # status-only health check -- humans and platform alike --
+                # mistook "Waking..." for a working app.
+                self.send_response(503)
+                self.send_header("Retry-After", "5")
+                body = _page(f"Waking {label}",
                     "This run was asleep. One moment; the page reloads by itself.",
-                    '<meta http-equiv="refresh" content="4">'))
+                    '<meta http-equiv="refresh" content="4">')
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
                 return
             self._html(502, _page("Nothing is answering here",
                 "Whatever this hostname points at is not running right now."))
