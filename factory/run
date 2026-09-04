@@ -117,6 +117,12 @@ new)
 handle @run-$NAME {
 	reverse_proxy 127.0.0.1:$PORT {
 		header_up X-Forwarded-Proto https
+		# A FROZEN run's kernel still accepts TCP, so a request hangs
+		# instead of failing and the wake trigger never fires -- treat
+		# slow headers as down so handle_errors can wake it.
+		transport http {
+			response_header_timeout 8s
+		}
 	}
 }
 CADDY
