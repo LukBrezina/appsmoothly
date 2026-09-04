@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AppSmoothly</title><meta name="description" content="You, your customer, and an agent in one room, around the clock: it refines, builds, reviews, hands you a test version, and ships when you say yes.">
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AppSmoothly</title><meta name="description" content="You, your customer, and an agent in one room, around the clock. It refines, builds, reviews, hands you a test version, and ships when you say yes.">
 
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 </head><body><style>
@@ -51,18 +51,18 @@ footer a:hover{text-decoration:underline}
 <div class="wrap">
 <p class="brand">AppSmoothly</p>
 
-<h1>You, your customer, and an agent — in one room, around the clock.</h1>
+<h1>You, your customer, and an agent in one room. Around the clock.</h1>
 
-<p>AppSmoothly gives an app its own room: you and your customer talk in it,
-and an agent that never leaves turns the talk into working software. It
+<p>AppSmoothly gives an app its own room. You and your customer talk in
+it, and an agent that never leaves turns the talk into working software. It
 refines the idea with you, builds it, reviews its own work, and hands you a
-version to click through. Say yes and it ships. Set up loops — a daily
-report, a cleanup, a check — and they keep running while you sleep.</p>
+version to click through. Say yes and it ships. Set up a loop, like a
+nightly report or a cleanup, and it runs while you sleep.</p>
 
-<p>The agent lives inside the app, not beside it. It can look something up
-in your data when the customer asks, prepare an invoice, send a mail or an
-SMS, fix the bug you just described in plain words. Between all that, it
-costs nothing but the small server it lives on.</p>
+<p>The agent lives inside the app. It can look something up in your data
+when the customer asks, prepare an invoice, send a mail or an SMS, fix the
+bug you described in plain words. Between tasks it costs nothing but the
+small server it lives on.</p>
 
 <figure>
 <svg viewBox="0 0 880 350" role="img" aria-label="One room holds you, your customer and the agent. The agent refines, builds and reviews, hands you a test version with your real data, and ships it to the live app when you say yes. Loops run back into the room around the clock.">
@@ -91,7 +91,7 @@ costs nothing but the small server it lives on.</p>
 
   <rect class="box" x="520" y="216" width="330" height="86" rx="10"/>
   <text class="b" x="685" y="246" text-anchor="middle">your live app</text>
-  <text class="s" x="685" y="266" text-anchor="middle">on its own server —</text>
+  <text class="s" x="685" y="266" text-anchor="middle">on its own server,</text>
   <text class="s" x="685" y="283" text-anchor="middle">customers use it every day</text>
 
   <line class="arrow-ok" x1="360" y1="88" x2="518" y2="80" marker-end="url(#ag)"/>
@@ -102,24 +102,28 @@ costs nothing but the small server it lives on.</p>
   <text class="lab" x="697" y="176">you say yes</text>
 
   <path class="arrow-amber" d="M 520 262 C 300 262 195 240 195 166" marker-end="url(#am)"/>
-  <text class="lab amber" x="295" y="292" text-anchor="middle">loops: reports, checks, cleanups —</text>
-  <text class="lab amber" x="295" y="309" text-anchor="middle">back into the room, around the clock</text>
+  <text class="lab amber" x="295" y="292" text-anchor="middle">loops run while you sleep</text>
+  <text class="lab amber" x="295" y="309" text-anchor="middle">and post back into the room</text>
 </svg>
 </figure>
 
 <h2>For developers</h2>
-<p>Under the hood it is boring on purpose. Plain Ruby on Rails; the
-workshop — agent, previews, loops — runs on one VPS, and production runs on
-its own. One container per piece of work, the whole small-app factory
-included:
-every change is a branch, a preview forked from production data, and a pull
-request — nothing crosses to the production server unreviewed. The base is opinionated
-and agent-ready, with guardrails, secrets that never touch the chat, and a
-build template that tracks main by itself. That is what makes it safe to
-ship a small niche app for a customer and then invite that customer into
-the room. When AI is not enough, any Rails freelancer picks up a normal
-codebase. Bring your own Claude subscription; idle cost is the VPS and
-backups.</p>
+<p>It is boring on purpose. Plain Ruby on Rails. The workshop with the
+agent, its previews and its loops runs on one VPS; production runs on its
+own. Each piece of work gets its own container. Every change is a branch, a
+preview forked from production data, and a pull request, and nothing
+crosses to the production server unreviewed.</p>
+
+<p>The base comes with opinions. Guardrails on what the agent may touch,
+secrets that never pass through the chat, a build template that follows
+your main branch by itself. Safe enough to ship a small niche app and then
+invite the customer in. When AI is not enough, any Rails freelancer can
+pick up a normal codebase. Bring your own Claude subscription. When nothing
+is being built, you pay for the VPS and the backups.</p>
+
+<p>Everything above is in the open repo:
+<a href="https://github.com/LukBrezina/appsmoothly">github.com/LukBrezina/appsmoothly</a>.
+Clone it onto your own VM.</p>
 
 <footer>
   <span>Built by Lukáš.</span>
