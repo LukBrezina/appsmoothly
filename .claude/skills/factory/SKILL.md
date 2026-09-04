@@ -35,13 +35,15 @@ preview route was wired by `run new`.
 ## Sleep is free, delete is forever
 
 Runs sleep **by themselves**: a run with no agent activity and no open
-preview connection for ~30 minutes is stopped (all state kept, 0 RAM) and a
-note lands in #System. It wakes on a message in its room or when someone
-opens its preview URL (the visitor sees a "waking" page that reloads).
-Manual control exists too:
+preview connection for ~30 minutes is FROZEN — every process kept
+mid-flight, memory swappable — and a note lands in #System. It wakes in
+about a second on a message in its room or when someone opens its preview
+URL. Nothing you start inside is lost by sleeping (though a process you
+leave in your own shell still dies with your turn — units remain the way
+to keep a server alive across your turns). Manual control exists too:
 
-    run sleep invoices     # stop it now
-    run wake invoices      # back in seconds
+    run sleep invoices     # freeze it now
+    run wake invoices      # back in ~1s
 
 When the PR is merged or the work abandoned:
 

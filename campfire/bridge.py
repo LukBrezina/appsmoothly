@@ -221,7 +221,7 @@ class Session:
             # into the container. The room's cwd, if set, is a path INSIDE
             # the run; room_workdir() cannot validate that from out here, so
             # it is taken as recorded.
-            subprocess.run(["incus", "start", run], capture_output=True)
+            wake_run(run)
             run_cwd = room_conf(self.room_id).get("cwd") or RUN_WORKDIR
             cmd = [
                 "incus", "exec", run,
@@ -393,6 +393,14 @@ REQUESTS_FILE = os.path.expanduser("~/.local/state/claude-bot/secret-requests.js
 RUNS_REG = "/var/lib/factory/runs.tsv"
 
 
+def wake_run(container):
+    """Bring a sleeping run back. Frozen is the normal sleep state -- freeze
+    keeps the app mid-flight, so waking needs no boot, no supervised unit,
+    nothing: unfreeze and it is serving. Stopped is the legacy/manual case."""
+    if subprocess.run(["incus", "unfreeze", container], capture_output=True).returncode != 0:
+        subprocess.run(["incus", "start", container], capture_output=True)
+
+
 def _known_runs():
     """Names of factory runs in this cell (empty when not a cell)."""
     try:
@@ -472,11 +480,11 @@ class Handler(BaseHTTPRequestHandler):
             host = (self.headers.get("Host") or "").split(":")[0]
             label = host.split(".")[0] if host else ""
             if label and re.fullmatch(r"[a-z0-9][a-z0-9-]*", label) and label in _known_runs():
-                subprocess.run(["incus", "start", f"run-{label}"], capture_output=True)
+                wake_run(f"run-{label}")
                 log(f"waking run-{label} (preview visit)")
                 self._html(200, _page(f"Waking {label}",
-                    "This run was asleep. It is starting now; the page reloads by itself.",
-                    '<meta http-equiv="refresh" content="12">'))
+                    "This run was asleep. One moment; the page reloads by itself.",
+                    '<meta http-equiv="refresh" content="4">'))
                 return
             self._html(502, _page("Nothing is answering here",
                 "Whatever this hostname points at is not running right now."))

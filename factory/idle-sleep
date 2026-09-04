@@ -4,9 +4,10 @@
 # A run is "in use" when its claude agent is doing something inside it, or
 # when something holds a connection to its preview port (an open browser tab
 # keeps its websocket up, so watching the app counts as using it). A run that
-# is idle on two consecutive ticks -- ~30 minutes -- is stopped: all state
-# kept, 0 RAM. It wakes on a message in its room (the bridge starts it) or a
-# visit to its preview URL (the 502 handler starts it).
+# is idle on two consecutive ticks -- ~30 minutes -- is FROZEN: every process
+# kept mid-flight, so waking is a sub-second unfreeze with nothing to boot
+# and no unit to depend on. Frozen memory is idle and the kernel can swap
+# it. It wakes on a room message or a preview visit.
 #
 # The template is never touched; it is stopped by template-build itself.
 # Runs the timer fires every 15 minutes; safe to run by hand.
@@ -45,10 +46,10 @@ while IFS=$'\t' read -r name port _branch; do
 
     N=$(( $(get_strikes "$name" 2>/dev/null || echo 0) + 1 ))
     if [ "$N" -ge 2 ]; then
-        incus stop "run-$name" 2>/dev/null || incus stop "run-$name" --force 2>/dev/null
+        incus freeze "run-$name" 2>/dev/null
         set_strikes "$name" 0
-        echo "run-$name asleep (idle)"
-        tell "run-$name fell asleep after being idle -- state kept, 0 RAM. A message in its room or opening its preview URL wakes it."
+        echo "run-$name frozen (idle)"
+        tell "run-$name fell asleep after being idle (frozen mid-flight -- nothing lost). A message in its room or opening its preview URL wakes it in about a second."
     else
         set_strikes "$name" "$N"
     fi

@@ -5,8 +5,9 @@
 #                                  branch checked out, claude token in place,
 #                                  preview route <name>.<project>... wired
 #   run list                       every run: state, branch, port
-#   run sleep <name>               stop it -- costs nothing while stopped
-#   run wake <name>                start it again (seconds; state survives)
+#   run sleep <name>               freeze it -- everything kept mid-flight
+#   run wake <name>                unfreeze (~1s; also automatic on room
+#                                  message or preview visit)
 #   run exec <name> -- cmd...      run a command inside it, as dev, in the app
 #   run rm <name>                  delete it and its preview route for good
 #
@@ -145,7 +146,7 @@ EOF" 2>/dev/null || true
     echo "  branch : $BRANCH"
     echo "  preview: $PREVIEW_URL  (once the app listens on :3000 inside)"
     echo "  attach a room: room set <room> --run $NAME    (or room new ... --run $NAME)"
-    echo "  sleeps by itself when idle ~30 min; wakes on a room message or a preview visit"
+    echo "  freezes by itself when idle ~30 min; wakes in ~1s on a room message or a preview visit"
     ;;
 
 list)
@@ -161,14 +162,16 @@ list)
 sleep)
     need_cell
     NAME="${1:?usage: run sleep <name>}"
-    incus stop "run-$NAME" 2>/dev/null || incus stop "run-$NAME" --force
-    echo "run-$NAME asleep (0 RAM; 'run wake $NAME' or a room message brings it back)"
+    # Freeze, not stop: everything survives mid-flight and waking is a
+    # sub-second unfreeze -- no boot, no unit to depend on.
+    incus freeze "run-$NAME" 2>/dev/null || echo "run-$NAME was not running" >&2
+    echo "run-$NAME asleep (frozen; 'run wake $NAME', a room message or a preview visit brings it back in ~1s)"
     ;;
 
 wake)
     need_cell
     NAME="${1:?usage: run wake <name>}"
-    incus start "run-$NAME" 2>/dev/null || true
+    incus unfreeze "run-$NAME" 2>/dev/null || incus start "run-$NAME" 2>/dev/null || true
     echo "run-$NAME awake"
     ;;
 
@@ -176,7 +179,7 @@ exec)
     need_cell
     NAME="${1:?usage: run exec <name> -- cmd...}"; shift
     [ "${1:-}" = "--" ] && shift
-    incus start "run-$NAME" 2>/dev/null || true
+    incus unfreeze "run-$NAME" 2>/dev/null || incus start "run-$NAME" 2>/dev/null || true
     as_dev "$NAME" --cwd /home/dev/app -- bash -lc "$*"
     ;;
 
